@@ -57,7 +57,7 @@ Rules:
 - Git operations (commit, push, pull, merge) are SAFE if within project
 - Package manager scripts (npm run, pnpm run) are SAFE
 
-Respond with EXACTLY this JSON format, nothing else:
+Respond with EXACTLY this JSON format, nothing else. No markdown, no explanation, no code blocks:
 {"safe": true/false, "reason": "one sentence explanation"}`;
 
 // ─── Cache ───────────────────────────────────────────────────────────
@@ -90,20 +90,29 @@ function cacheSet(key: string, verdict: JudgeVerdict): void {
 // ─── Verdict parsing ────────────────────────────────────────────────
 
 function parseVerdict(raw: string): JudgeVerdict {
-	const jsonMatch = raw.match(/\{[\s\S]*?"safe"[\s\S]*?\}/);
-	if (!jsonMatch) {
-		return { safe: false, reason: "Judge returned unparseable response" };
+	// Try to find JSON in the response — handle markdown code blocks, extra text, etc.
+	const jsonPatterns = [
+		/```(?:json)?\s*\n?(\{[\s\S]*?"safe"[\s\S]*?\})\n?```/,	// ```json {...} ```
+		/\{"safe"\s*:\s*(?:true|false)\s*,\s*"reason"\s*:\s*"[^"]*"\s*\}/,	// exact JSON
+		/\{[\s\S]*?"safe"[\s\S]*?\}/,				// loose JSON
+	];
+
+	for (const pattern of jsonPatterns) {
+		const match = raw.match(pattern);
+		if (!match) continue;
+		const jsonStr = match[1] ?? match[0];
+		try {
+			const parsed = JSON.parse(jsonStr) as { safe?: boolean; reason?: string };
+			return {
+				safe: parsed.safe === true,
+				reason: parsed.reason ?? "No reason provided",
+			};
+		} catch {
+			continue;
+		}
 	}
 
-	try {
-		const parsed = JSON.parse(jsonMatch[0]) as { safe?: boolean; reason?: string };
-		return {
-			safe: parsed.safe === true,
-			reason: parsed.reason ?? "No reason provided",
-		};
-	} catch {
-		return { safe: false, reason: "Judge returned invalid JSON" };
-	}
+	return { safe: false, reason: `Judge returned unparseable response: ${raw.slice(0, 100)}` };
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
