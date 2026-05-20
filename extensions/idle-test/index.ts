@@ -49,6 +49,15 @@ export default function (pi: ExtensionAPI): void {
 	// ── Session events ──
 	pi.on("session_start", async (_e, ctx) => entry("session_start", "", ctx));
 	pi.on("session_shutdown", async (_e, ctx) => entry("session_shutdown", "", ctx));
+	pi.on("session_start", async (_e, ctx) => entry("session_start", "", ctx));
+	pi.on("session_shutdown", async (_e, ctx) => entry("session_shutdown", "", ctx));
+	// ── Agent lifecycle ──
+	pi.on("agent_start", async (_e, ctx) => entry("agent_start", "", ctx));
+	pi.on("agent_end", async (e, ctx) => {
+		const msgCount = e.messages?.length ?? 0;
+		entry("agent_end", `messages=${msgCount}`, ctx);
+	});
+	pi.on("before_agent_start", async (_e, ctx) => entry("before_agent_start", "", ctx));
 
 	// ── Turn lifecycle ──
 	pi.on("turn_start", async (e, ctx) => {
@@ -133,7 +142,15 @@ export default function (pi: ExtensionAPI): void {
 			lines.push("═══ ANALYSIS ═══");
 			lines.push("");
 
-			// Find all moments where isIdle was true
+			// Find agent_end events and check state
+		const agentEnds = log.filter((e) => e.event === "agent_end");
+		lines.push("");
+		lines.push(`agent_end events: ${agentEnds.length}`);
+		for (const a of agentEnds) {
+			lines.push(`  +${a.offset}ms  idle=${a.isIdle}  signal=${a.hasSignal}  pending=${a.hasPending}  ${a.details}`);
+		}
+
+		// Find all moments where isIdle was true
 			const idleMoments = log.filter((e) => e.isIdle === true);
 			lines.push(`isIdle=true moments: ${idleMoments.length}`);
 			for (const m of idleMoments) {
