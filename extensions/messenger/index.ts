@@ -23,6 +23,27 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 export default function (pi: ExtensionAPI): void {
+
+	// ── Inject tool docs into system prompt ──
+
+	pi.on("before_agent_start", async (event) => {
+		event.systemPrompt += `
+
+## messenger extension
+
+You have a \`messenger\` tool for inter-agent communication.
+
+Usage:
+- \`messenger({ action: "send", to: "agent-name", body: "message" })\` — send to specific agent
+- \`messenger({ action: "broadcast", body: "message" })\` — send to all agents
+- \`messenger({ action: "inbox" })\` — read your messages
+- \`messenger({ action: "agents" })\` — list known agents
+- \`messenger({ action: "clear" })\` — clear your inbox
+
+Use this to coordinate work with worktree agents or other parallel sessions.
+`;
+	});
+
 	let bus: MessageBus | null = null;
 
 	function getBus(ctx: ExtensionContext): MessageBus {

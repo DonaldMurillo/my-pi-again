@@ -27,6 +27,29 @@ import {
 } from "./worktree-manager.js";
 
 export default function (pi: ExtensionAPI): void {
+
+	// ── Inject tool docs into system prompt ──
+
+	pi.on("before_agent_start", async (event) => {
+		event.systemPrompt += `
+
+## worktree extension
+
+You have a \`worktree\` tool for git worktree management and agent orchestration.
+
+Usage:
+- \`worktree({ action: "list" })\` — show all worktrees
+- \`worktree({ action: "create", branch: "feat/auth", purpose: "Add auth" })\` — create worktree
+- \`worktree({ action: "spawn", branch: "feat/auth" })\` — start headless agent in worktree
+- \`worktree({ action: "send", branch: "feat/auth", message: "Start on login" })\` — send task to agent
+- \`worktree({ action: "status" })\` — check all agent statuses
+- \`worktree({ action: "kill", branch: "feat/auth" })\` — stop agent
+- \`worktree({ action: "cleanup", branch: "feat/auth" })\` — remove worktree and kill agent
+
+Each worktree gets an isolated agent that works independently. Use this to parallelize work.
+`;
+	});
+
 	// ── Tool: worktree ─────────────────────────────────────────────────
 
 	pi.registerTool({
