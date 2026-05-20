@@ -141,11 +141,8 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 		judgeStats = { allowed: 0, blocked: 0, timedOut: 0 };
 
 		if (config.enabled && ctx.hasUI) {
-			const autoTag = config.autoMode ? " 🔮 auto" : "";
-			const allowedInfo = config.allowPaths.length > 0
-				? ` (+${config.allowPaths.length} hatch${config.allowPaths.length > 1 ? "es" : ""})`
-				: "";
-			ctx.ui.setStatus("isolation", `🔒${autoTag} ${cwd}${allowedInfo}`);
+		const autoTag = config.autoMode ? " 🔮" : "";
+		ctx.ui.setStatus("isolation", `🔒${autoTag} ${cwd}`);
 		}
 	});
 
