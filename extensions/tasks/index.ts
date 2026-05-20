@@ -451,46 +451,72 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── Inject tool docs into system prompt ──
 
+
 	pi.on("before_agent_start", async (event) => {
 		event.systemPrompt += `
 
-## tasks extension
+<task_management>
+<CRITICAL>
+You have task management tools. Using them is NOT OPTIONAL.
 
-You have task management tools for persistent, structured task tracking. Tasks survive session
-restarts and compaction. You MUST use these tools actively to track your work — do NOT ask the user
-to manage tasks manually.
+If the user gives you work with more than one step and you are NOT calling TodoWrite or TaskCreate,
+you are violating a core behavioral rule. Create the plan FIRST, then do the work.
+</CRITICAL>
 
-### When to create tasks
-- At the start of any multi-step task: use TodoWrite or TaskCreate to plan the steps
-- When you identify subtasks or dependencies: use TaskCreate with parentTaskId, blocks, blockedBy
-- When starting a new feature or bug fix: create a task before writing code
-- When delegating to a worktree agent: create a task with owner: "worktree:<branch>"
+<RULE name="before_work">
+1. User gives multiple things to do → call TodoWrite FIRST with the full plan
+2. User asks for a feature or complex change → call TaskCreate BEFORE touching any code
+3. You identify sub-steps → call TaskDecompose or create subtasks with parentTaskId
+</RULE>
 
-### When to update tasks
-- When you start working on a task: TaskUpdate({ taskId, status: "in_progress" })
-- When you finish a task: TaskUpdate({ taskId, status: "completed" })
-- When blocked on something: TaskUpdate({ taskId, status: "blocked" })
-- When handing off to review: TaskUpdate({ taskId, status: "review" })
+<RULE name="during_work">
+4. Starting a task → TaskUpdate({ taskId, status: "in_progress" })
+5. Finishing a task → TaskUpdate({ taskId, status: "completed" })
+6. Blocked on something → TaskUpdate({ taskId, status: "blocked" })
+</RULE>
 
-### When to check tasks
-- On session start: TaskList({}) to see what's pending from last session
-- Before asking "what should I work on?": TaskNext({})
-- Before claiming work is done: verify all tasks are completed with TaskList({})
+<EXAMPLE trigger="user says 'fix the bug and add tests'">
+TodoWrite({ todos: [
+  { content: "Fix the bug", status: "in_progress", activeForm: "Fixing bug" },
+  { content: "Add tests", status: "pending" }
+] })
+// ... fix the bug ...
+TodoWrite({ todos: [
+  { content: "Fix the bug", status: "completed" },
+  { content: "Add tests", status: "in_progress", activeForm: "Adding tests" }
+] })
+// ... write tests ...
+TodoWrite({ todos: [
+  { content: "Fix the bug", status: "completed" },
+  { content: "Add tests", status: "completed" }
+] })
+</EXAMPLE>
 
-### Tool reference
-- \`TodoWrite({ todos: [...] })\` — replace full task list (Claude Code compatible)
-- \`TaskCreate({ subject, priority, labels, ... })\` — create task with full schema
-- \`TaskUpdate({ taskId, status, ... })\` — update any task field
-- \`TaskGet({ taskId })\` — get full task details
-- \`TaskList({ status, owner, labels, sort })\` — list with filters
-- \`TaskNext({})\` — get next actionable task (respects deps)
-- \`TaskSearch({ query })\` — search by text
-- \`TaskDecompose({ taskId })\` — break task into subtasks via LLM
-- \`TaskArchive({ status })\` — archive completed tasks
+<EXAMPLE trigger="user says 'implement auth with login, signup, and OAuth'">
+TaskCreate({ subject: "Auth system", priority: "high", labels: ["auth"] })
+TaskDecompose({ taskId, subtasks: [
+  { subject: "Login endpoint" },
+  { subject: "Signup endpoint" },
+  { subject: "OAuth integration" }
+] })
+// Work through each subtask, updating status as you go
+</EXAMPLE>
+
+<tools>
+TodoWrite({ todos: [...] }) — ephemeral todo list (in-memory, cleared on session end)
+TaskCreate({ subject, priority, labels, ... }) — persistent task (survives restarts)
+TaskUpdate({ taskId, status, ... }) — update any field
+TaskGet({ taskId }) — full details
+TaskList({ status, owner, sort }) — filtered list
+TaskNext({}) — next actionable task (respects deps)
+TaskSearch({ query }) — text search
+TaskDecompose({ taskId, subtasks }) — break into subtasks
+TaskArchive({ status }) — archive completed
+</tools>
+</task_management>
 `;
 	});
 
-	// ── Session recovery ──
 
 	pi.on("session_start", async (_event, ctx) => {
 		const store = loadStore(ctx.cwd);
