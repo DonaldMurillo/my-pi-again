@@ -26,7 +26,7 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { Text, matchesKey } from "@mariozechner/pi-tui";
+import { matchesKey } from "@mariozechner/pi-tui";
 
 // ─── ULID ────────────────────────────────────────────────────────────
 
@@ -335,15 +335,12 @@ interface BoardState {
 }
 
 function renderTaskBoard(
-	tui: any,
 	theme: Theme,
 	state: BoardState,
-	done: (result: string | null) => void,
-): void {
-	const width = tui.width;
-	const height = tui.height;
-
-	tui.clear();
+	width: number,
+	height: number,
+): string[] {
+	const lines: string[] = [];
 
 	// Filter tasks
 	let filtered = state.tasks;
@@ -362,7 +359,7 @@ function renderTaskBoard(
 	};
 
 	const header = theme.bold(` Task Board — ${filterLabels[state.filter]} (${filtered.length}) `);
-	tui.write(0, 0, theme.fg("accent", header));
+	lines.push(theme.fg("accent", header));
 
 	// Status counts
 	const counts: Record<string, number> = { all: state.tasks.length };
@@ -374,10 +371,10 @@ function renderTaskBoard(
 		.filter((s) => counts[s])
 		.map((s) => `${filterLabels[s] || s}: ${counts[s]}`)
 		.join("  ");
-	tui.write(0, 1, theme.fg("dim", countParts));
+	lines.push(theme.fg("dim", countParts));
 
 	// Separator
-	tui.write(0, 2, theme.fg("border", "─".repeat(width)));
+	lines.push(theme.fg("border", "─".repeat(width)));
 
 	// Task list
 	const startRow = 3;
@@ -412,7 +409,7 @@ function renderTaskBoard(
 			line = theme.fg("dim", line);
 		}
 
-		tui.write(0, row, line);
+		lines.push(line);
 		row++;
 
 		// Expanded details
@@ -427,7 +424,7 @@ function renderTaskBoard(
 
 			for (const d of details) {
 				if (row >= height - 2) break;
-				tui.write(0, row, theme.fg("dim", isSelected ? theme.bg("selectedBg", d) : d));
+				lines.push(theme.fg("dim", isSelected ? theme.bg("selectedBg", d) : d));
 				row++;
 			}
 		}
@@ -435,10 +432,17 @@ function renderTaskBoard(
 		if (row >= height - 2) break;
 	}
 
+	// Pad to height - 2
+	while (lines.length < height - 2) {
+		lines.push("");
+	}
+
 	// Footer
-	tui.write(0, height - 2, theme.fg("border", "─".repeat(width)));
+	lines.push(theme.fg("border", "─".repeat(width)));
 	const footer = " ↑↓/jk:nav  Enter:expand  f:filter  n:next  a:archive  q:close ";
-	tui.write(0, height - 1, theme.fg("dim", footer));
+	lines.push(theme.fg("dim", footer));
+
+	return lines;
 }
 
 // ─── Extension ───────────────────────────────────────────────────────
@@ -562,79 +566,102 @@ to manage tasks manually.
 
 	// ── Persistent task widget + status ──
 
+
 	function refreshWidget(ctx: ExtensionContext): void {
 		const store = loadStore(ctx.cwd);
 		const tasks = Object.values(store.tasks).filter((t) => t.status !== "deleted");
+		const hasTodos = todos.length > 0;
+		const hasTasks = tasks.length > 0;
 
-		if (tasks.length === 0) {
+		if (!hasTodos && !hasTasks) {
 			ctx.ui.setWidget("tasks", undefined);
+			ctx.ui.setWidget("todos", undefined);
 			ctx.ui.setStatus("tasks", undefined);
 			return;
 		}
 
-		const inProgress = tasks.filter((t) => t.status === "in_progress");
-		const pending = tasks.filter((t) => t.status === "pending");
-		const blocked = tasks.filter((t) => t.status === "blocked");
-		const completed = tasks.filter((t) => t.status === "completed");
-		const review = tasks.filter((t) => t.status === "review");
-		const active = inProgress.length + pending.length + blocked.length + review.length;
-
-		// Footer status — compact counts
+		// ── Footer status ──
 		const parts: string[] = [];
-		if (inProgress.length) parts.push(`●${inProgress.length}`);
-		if (blocked.length) parts.push(`⊘${blocked.length}`);
-		if (pending.length) parts.push(`○${pending.length}`);
-		if (review.length) parts.push(`◎${review.length}`);
-		if (completed.length) parts.push(`✓${completed.length}`);
+		if (hasTodos) {
+			const a = todos.filter((t) => t.status !== "completed").length;
+			const d = todos.filter((t) => t.status === "completed").length;
+			parts.push(`todo:${a}`);
+			if (d) parts.push(`done:${d}`);
+		}
+		if (hasTasks) {
+			const ip = tasks.filter((t) => t.status === "in_progress").length;
+			const p = tasks.filter((t) => t.status === "pending").length;
+			const b = tasks.filter((t) => t.status === "blocked").length;
+			const c = tasks.filter((t) => t.status === "completed").length;
+			if (ip) parts.push(`in-progress:${ip}`);
+			if (b) parts.push(`blocked:${b}`);
+			if (p) parts.push(`pending:${p}`);
+			if (c) parts.push(`done:${c}`);
+		}
 		ctx.ui.setStatus("tasks", `📋 ${parts.join(" ")}`);
 
-		// Widget above editor — active tasks detail
-		if (active === 0) {
-			ctx.ui.setWidget("tasks", undefined);
-			return;
-		}
+		// ── Todos widget (warm colors — warning/amber) ──
+		if (hasTodos) {
+			const activeTodos = todos.filter((t) => t.status !== "completed");
+			const doneTodos = todos.filter((t) => t.status === "completed");
 
-		const lines: string[] = [];
-
-		// In-progress tasks (max 2)
-		for (const t of inProgress.slice(0, 2)) {
-			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
-			let line = `● ${pri} ${t.subject}`;
-			if (t.activeForm) line += `  (${t.activeForm})`;
-			lines.push(line);
-		}
-
-		// Blocked tasks (max 1)
-		if (blocked.length) {
-			const t = blocked[0];
-			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
-			lines.push(`⊘ ${pri} ${t.subject}`);
-		}
-
-		// Pending count if any
-		if (pending.length && !inProgress.length) {
-			const t = pending.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])[0];
-			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
-			lines.push(`○ ${pri} ${t.subject}`);
-		}
-
-		if (lines.length > 0) {
-			// Render using component factory for theme support
-			ctx.ui.setWidget("tasks", (tui: any, theme: Theme) => {
-				const rendered: Text[] = [];
-				for (let i = 0; i < lines.length; i++) {
-					const line = lines[i];
-					let text: string;
-					if (line.startsWith("●")) {
-						text = theme.fg("accent", line);
-					} else if (line.startsWith("⊘")) {
-						text = theme.fg("warning", line);
-					} else {
-						text = theme.fg("muted", line);
-					}
-					rendered.push(new Text(text, 0, i));
+			ctx.ui.setWidget("todos", (_tui: any, theme: Theme) => {
+				const themed: string[] = [];
+				themed.push(theme.fg("warning", theme.bold("todos")));
+				for (let i = 0; i < Math.min(activeTodos.length, 3); i++) {
+					const t = activeTodos[i];
+					const icon = t.status === "in_progress" ? "●" : "○";
+					let line = `${icon} ${t.content}`;
+					if (t.activeForm && t.status === "in_progress") line += `  (${t.activeForm})`;
+					themed.push(t.status === "in_progress" ? theme.fg("warning", line) : theme.fg("muted", line));
 				}
-				return rendered;
+				for (let i = 0; i < Math.min(doneTodos.length, 2); i++) {
+					themed.push(theme.fg("dim", theme.strikethrough(`✓ ${doneTodos[i].content}`)));
+				}
+				return {
+					render(_width: number): string[] { return themed; },
+					invalidate() {},
+				};
+			});
+		} else {
+			ctx.ui.setWidget("todos", undefined);
+		}
+
+		// ── Tasks widget (cool colors — accent/blue) ──
+		if (hasTasks) {
+			const inProgress = tasks.filter((t) => t.status === "in_progress")
+				.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+			const blocked = tasks.filter((t) => t.status === "blocked")
+				.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+			const pending = tasks.filter((t) => t.status === "pending")
+				.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+			const completed = tasks.filter((t) => t.status === "completed")
+				.sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+
+			ctx.ui.setWidget("tasks", (_tui: any, theme: Theme) => {
+				const themed: string[] = [];
+				themed.push(theme.fg("accent", theme.bold("tasks")));
+				let count = 0;
+				for (const t of [...inProgress, ...blocked, ...pending]) {
+					if (count >= 3) break;
+					const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
+					const icon = { in_progress: "●", blocked: "⊘", pending: "○", review: "◎" }[t.status as string];
+					let line = `${icon} ${pri} ${t.subject}`;
+					if (t.activeForm && t.status === "in_progress") line += `  (${t.activeForm})`;
+					if (t.status === "in_progress") themed.push(theme.fg("accent", line));
+					else if (t.status === "blocked") themed.push(theme.fg("error", line));
+					else themed.push(theme.fg("text", line));
+					count++;
+				}
+				for (const t of completed) {
+					if (count >= 5) break;
+					themed.push(theme.fg("dim", `✓ ${t.subject}`));
+					count++;
+				}
+				return {
+					render(_width: number): string[] { return themed; },
+					invalidate() {},
+				};
 			});
 		} else {
 			ctx.ui.setWidget("tasks", undefined);
@@ -662,14 +689,19 @@ to manage tasks manually.
 	//  TOOLS
 	// ═══════════════════════════════════════════════════════════════════
 
+
+	// ── In-memory todos (TodoWrite) — NOT persisted ──
+
+	let todos: Array<{ content: string; status: "pending" | "in_progress" | "completed"; activeForm?: string }> = [];
+
 	// ── Tool: TodoWrite ────────────────────────────────────────────────
 
 	pi.registerTool({
 		name: "TodoWrite",
 		label: "TodoWrite",
 		description:
-			"Replace the current task list. Items present in the new list are upserted; " +
-			"items absent from the new list are marked completed. Claude Code compatible.",
+			"Replace the current in-memory todo list. Items not in the new list are " +
+			"removed. This is transient — does NOT persist to disk. For persistent tasks use TaskCreate.",
 		parameters: Type.Object({
 			todos: Type.Array(
 				Type.Object({
@@ -683,100 +715,24 @@ to manage tasks manually.
 				}),
 			),
 		}),
-		promptSnippet: "Write or update the task list",
+		promptSnippet: "Write or update the todo list",
 		promptGuidelines: [
-			"Use TodoWrite to replace the entire task list with a new set of tasks. " +
-				"Existing tasks not in the new list are marked completed.",
+			"Use TodoWrite to replace the in-memory todo list. This is ephemeral — cleared on session end.",
 		],
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const cwd = ctx.cwd;
-			const store = loadStore(cwd);
-			const now = Date.now();
+			todos = params.todos.map((t) => ({
+				content: t.content,
+				status: t.status as "pending" | "in_progress" | "completed",
+				activeForm: t.activeForm,
+			}));
 
-			// Map existing tasks by subject for matching
-			const existingBySubject = new Map<string, Task>();
-			for (const task of Object.values(store.tasks)) {
-				if (task.status !== "deleted") {
-					existingBySubject.set(task.subject.toLowerCase(), task);
-				}
-			}
-
-			const newSubjects = new Set<string>();
-
-			for (const todo of params.todos) {
-				const key = todo.content.toLowerCase();
-				newSubjects.add(key);
-
-				if (existingBySubject.has(key)) {
-					const task = existingBySubject.get(key)!;
-					const oldStatus = task.status;
-					task.status = todo.status as TaskStatus;
-					task.updatedAt = now;
-					if (todo.activeForm) task.activeForm = todo.activeForm;
-
-					if (todo.status === "in_progress" && oldStatus !== "in_progress") {
-						task.startedAt = now;
-					}
-					if (todo.status === "completed" && oldStatus !== "completed") {
-						task.completedAt = now;
-						if (task.startedAt) {
-							task.timeSpentSeconds = Math.round((now - task.startedAt) / 1000);
-						}
-						emitEvent("task:completed", { taskId: task.id, timeSpentSeconds: task.timeSpentSeconds });
-						notifyCompletion(cwd, task);
-					}
-				} else {
-					const task: Task = {
-						id: ulid(),
-						subject: todo.content,
-						description: "",
-						status: todo.status as TaskStatus,
-						priority: "medium",
-						labels: [],
-						blocks: [],
-						blockedBy: [],
-						createdAt: now,
-						updatedAt: now,
-						startedAt: todo.status === "in_progress" ? now : undefined,
-						metadata: {},
-						source: "claude-code",
-					};
-					if (todo.activeForm) task.activeForm = todo.activeForm;
-					store.tasks[task.id] = task;
-
-					emitEvent("task:created", { taskId: task.id, source: "claude-code", subject: task.subject });
-				}
-			}
-
-			// Mark absent tasks as completed
-			for (const task of Object.values(store.tasks)) {
-				if (
-					task.status !== "deleted" &&
-					task.status !== "completed" &&
-					!newSubjects.has(task.subject.toLowerCase())
-				) {
-					task.status = "completed";
-					task.completedAt = now;
-					task.updatedAt = now;
-					if (task.startedAt) {
-						task.timeSpentSeconds = Math.round((now - task.startedAt) / 1000);
-					}
-					emitEvent("task:completed", { taskId: task.id, timeSpentSeconds: task.timeSpentSeconds });
-					notifyCompletion(cwd, task);
-				}
-			}
-
-			saveStore(cwd, store);
-
-			const activeTasks = Object.values(store.tasks).filter(
-				(t) => t.status !== "deleted" && t.status !== "completed",
-			);
+			const active = todos.filter((t) => t.status !== "completed").length;
 
 			return {
 				content: [{
 					type: "text" as const,
-					text: `Updated ${params.todos.length} todos. ${activeTasks.length} active tasks remaining.`,
+					text: `Updated ${todos.length} todos. ${active} active.`,
 				}],
 			};
 		},
@@ -1520,11 +1476,14 @@ to manage tasks manually.
 			];
 
 			ctx.ui.custom<string | null>((tui, theme, kb, done) => {
-				// Initial render
-				const render = () => renderTaskBoard(tui, theme, state, done);
-				render();
+				// Use fixed overlay dimensions for layout calculations
+				const overlayWidth = 60;
+				const overlayHeight = 24;
 
 				return {
+					render(width: number): string[] {
+						return renderTaskBoard(theme, state, overlayWidth, overlayHeight);
+					},
 					handleInput(data) {
 						const key = data;
 
@@ -1532,24 +1491,24 @@ to manage tasks manually.
 							if (state.selectedIdx > 0) {
 								state.selectedIdx--;
 								// Scroll up if needed
-								const visibleHeight = tui.height - 5;
+								const visibleHeight = overlayHeight - 5;
 								if (state.selectedIdx < state.scrollOffset) {
 									state.scrollOffset = state.selectedIdx;
 								}
 							}
-							render();
+							tui.requestRender();
 						} else if (matchesKey(key, "down") || key === "j") {
 							const filtered = state.filter === "all"
 								? state.tasks
 								: state.tasks.filter((t) => t.status === state.filter);
 							if (state.selectedIdx < filtered.length - 1) {
 								state.selectedIdx++;
-								const visibleHeight = tui.height - 5;
+								const visibleHeight = overlayHeight - 5;
 								if (state.selectedIdx >= state.scrollOffset + visibleHeight) {
 									state.scrollOffset = state.selectedIdx - visibleHeight + 1;
 								}
 							}
-							render();
+							tui.requestRender();
 						} else if (key === "Enter") {
 							const filtered = state.filter === "all"
 								? state.tasks
@@ -1562,14 +1521,14 @@ to manage tasks manually.
 									state.expanded.add(task.id);
 								}
 							}
-							render();
+							tui.requestRender();
 						} else if (key === "f") {
 							// Cycle filter
 							const currentIdx = filterOrder.indexOf(state.filter);
 							state.filter = filterOrder[(currentIdx + 1) % filterOrder.length];
 							state.selectedIdx = 0;
 							state.scrollOffset = 0;
-							render();
+							tui.requestRender();
 						} else if (key === "n") {
 							// Get next task
 							const next = findNextTask(loadStore(ctx.cwd));
@@ -1579,14 +1538,14 @@ to manage tasks manually.
 									state.selectedIdx = idx;
 									state.expanded.add(next.id);
 									// Scroll into view
-									const visibleHeight = tui.height - 5;
+									const visibleHeight = overlayHeight - 5;
 									if (idx < state.scrollOffset) state.scrollOffset = idx;
 									if (idx >= state.scrollOffset + visibleHeight) {
 										state.scrollOffset = idx - visibleHeight + 1;
 									}
 								}
 							}
-							render();
+							tui.requestRender();
 						} else if (key === "a") {
 							// Quick archive
 							done("archive");
@@ -1596,6 +1555,9 @@ to manage tasks manually.
 					},
 					dispose() {},
 				};
+			}, {
+				overlay: true,
+				overlayOptions: { anchor: "center", width: 60, maxHeight: 24 },
 			}).then((result) => {
 				if (result === "archive") {
 					// Quick archive completed tasks
