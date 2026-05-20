@@ -218,7 +218,7 @@ export default function registerMetaSkills(pi: ExtensionAPI): void {
 		config = loadConfig(ctx.cwd);
 		skills = discoverExternalSkills(ctx.cwd, config);
 		if (skills.length > 0 && ctx.hasUI) {
-			ctx.ui.setStatus("meta-skills", `🔗 ${skills.length} external skill${skills.length !== 1 ? "s" : ""}`);
+			// Skills are loaded silently — see /custom-pi for info
 		}
 	});
 

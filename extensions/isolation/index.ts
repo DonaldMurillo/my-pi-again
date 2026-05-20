@@ -94,6 +94,17 @@ function loadConfig(cwd: string): IsolationConfig {
 
 const WRITE_TOOLS = new Set(["write", "edit"]);
 
+// ─── Helpers ────────────────────────────────────────────────────────
+
+function getGitBranch(dir: string): string | null {
+	try {
+		const result = require("node:child_process").execSync("git branch --show-current 2>/dev/null", { cwd: dir, encoding: "utf8", timeout: 3000 });
+		return result.trim() || null;
+	} catch {
+		return null;
+	}
+}
+
 // ─── Extension registration ─────────────────────────────────────────
 
 let config: IsolationConfig = { ...DEFAULT_CONFIG };
@@ -141,8 +152,10 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 		judgeStats = { allowed: 0, blocked: 0, timedOut: 0 };
 
 		if (config.enabled && ctx.hasUI) {
-		const autoTag = config.autoMode ? " 🔮" : "";
-		ctx.ui.setStatus("isolation", `🔒${autoTag} ${cwd}`);
+			const branch = getGitBranch(cwd);
+			const autoTag = config.autoMode ? "auto" : "manual";
+			const branchTag = branch ? ` ${branch}` : "";
+			ctx.ui.setStatus("isolation", `locked ${autoTag}${branchTag}  ${cwd}`);
 		}
 	});
 
