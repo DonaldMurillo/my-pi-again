@@ -1,26 +1,21 @@
 /**
  * LLM Judge for the Isolation extension.
  *
- * When a bash command is flagged as "restricted" by the static rules,
- * this module asks a fast model whether the command is actually safe
- * given the context (cwd, command, intent).
- *
- * Uses pi's own model registry + SDK to resolve auth and make calls,
- * so it works with any provider pi supports (OAuth, API keys, etc.).
- *
- * Flow:
- *   restricted command → cache check → LLM judge → allow/block
+ * Uses pi's own SDK (`complete` from `@mariozechner/pi-ai`) to call models,
+ * so auth (OAuth, API keys, env vars) is resolved through pi's model registry.
  *
  * Config (in .pi/isolation.json):
  *   {
  *     "autoMode": true,
- *     "judgeProvider": "github-copilot",
- *     "judgeModel": "gpt-5-mini",
+ *     "judgeProvider": "zai",
+ *     "judgeModel": "glm-4.7-flash",
  *     "judgeTimeout": 8000
  *   }
  */
 
 import { createHash } from "node:crypto";
+import { complete, getModel } from "@mariozechner/pi-ai";
+import type { Model, Api } from "@mariozechner/pi-ai";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -45,7 +40,7 @@ interface CacheEntry {
 
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const CACHE_MAX = 200;
-const RATE_LIMIT_COOLDOWN = 30 * 1000; // 30 seconds — don't retry after 429
+const RATE_LIMIT_COOLDOWN = 30 * 1000; // 30 seconds
 
 const SYSTEM_PROMPT = `You are a security judge for a coding agent sandbox. Given a bash command and the project directory, decide if the command is SAFE or UNSAFE.
 
@@ -92,84 +87,7 @@ function cacheSet(key: string, verdict: JudgeVerdict): void {
 	cache.set(key, { verdict, timestamp: Date.now() });
 }
 
-// ─── LLM call via pi's model registry ───────────────────────────────
-
-async function callJudge(
-	command: string,
-	cwd: string,
-	config: AutoModeConfig,
-	getApiKey: (provider: string) => Promise<string | undefined>,
-	signal?: AbortSignal,
-): Promise<JudgeVerdict> {
-	// Check if we're in rate-limit cooldown
-	if (Date.now() - lastRateLimitAt < RATE_LIMIT_COOLDOWN) {
-		return { safe: false, reason: "Judge rate-limited, retry later" };
-	}
-
-	const userPrompt = `Project directory: ${cwd}\nCommand: ${command}\n\nIs this command safe to run?`;
-
-	// Resolve API key through pi's model registry (handles OAuth, env vars, auth.json)
-	const apiKey = await getApiKey(config.judgeProvider);
-	if (!apiKey) {
-		return { safe: false, reason: `No auth found for judge provider "${config.judgeProvider}"` };
-	}
-
-	// Resolve base URL based on provider
-	const baseUrl = getProviderBaseUrl(config.judgeProvider);
-	if (!baseUrl) {
-		return { safe: false, reason: `Unknown judge provider "${config.judgeProvider}"` };
-	}
-
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), config.judgeTimeout);
-	if (signal) {
-		signal.addEventListener("abort", () => controller.abort());
-	}
-
-	try {
-		const response = await fetch(`${baseUrl}/chat/completions`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"Authorization": `Bearer ${apiKey}`,
-			},
-			body: JSON.stringify({
-				model: config.judgeModel,
-				messages: [
-					{ role: "system", content: SYSTEM_PROMPT },
-					{ role: "user", content: userPrompt },
-				],
-				max_tokens: 100,
-				temperature: 0,
-				stream: false,
-			}),
-			signal: controller.signal,
-		});
-
-		if (response.status === 429) {
-			lastRateLimitAt = Date.now();
-			return { safe: false, reason: "Judge rate-limited" };
-		}
-
-		if (!response.ok) {
-			return { safe: false, reason: `Judge API error: ${response.status}` };
-		}
-
-		const data = await response.json() as {
-			choices?: Array<{ message?: { content?: string } }>;
-		};
-
-		const content = data.choices?.[0]?.message?.content?.trim() ?? "";
-		return parseVerdict(content);
-	} catch (error) {
-		if ((error as Error).name === "AbortError") {
-			return { safe: false, reason: "Judge timed out" };
-		}
-		return { safe: false, reason: `Judge error: ${(error as Error).message}` };
-	} finally {
-		clearTimeout(timeout);
-	}
-}
+// ─── Verdict parsing ────────────────────────────────────────────────
 
 function parseVerdict(raw: string): JudgeVerdict {
 	const jsonMatch = raw.match(/\{[\s\S]*?"safe"[\s\S]*?\}/);
@@ -188,56 +106,117 @@ function parseVerdict(raw: string): JudgeVerdict {
 	}
 }
 
-// ─── Provider URL resolution ─────────────────────────────────────────
-
-function getProviderBaseUrl(provider: string): string | null {
-	const urls: Record<string, string> = {
-		"github-copilot": "https://api.githubcopilot.com/v1",
-		"openai": "https://api.openai.com/v1",
-		"zai": "https://api.z.ai/api/coding/paas/v4",
-		"deepseek": "https://api.deepseek.com/v1",
-		"groq": "https://api.groq.com/openai/v1",
-		"anthropic": "https://api.anthropic.com/v1",
-	};
-	return urls[provider] ?? null;
-}
-
 // ─── Public API ─────────────────────────────────────────────────────
 
 export const DEFAULT_AUTO_MODE: AutoModeConfig = {
 	enabled: true,
-	judgeProvider: "github-copilot",
-	judgeModel: "gpt-5-mini",
+	judgeProvider: "zai",
+	judgeModel: "glm-4.7-flash",
 	judgeTimeout: 8000,
 };
 
+type GetAuthFn = (model: Model<Api>) => Promise<{
+	ok: true;
+	apiKey?: string;
+	headers?: Record<string, string>;
+} | {
+	ok: false;
+	error: string;
+}>;
+
 /**
  * Ask the LLM judge if a restricted bash command is actually safe.
- * Returns null if auto-mode is disabled.
+ * Uses pi's SDK to call the model — no raw HTTP, proper auth resolution.
  */
 export async function judgeCommand(
 	command: string,
 	currentCwd: string,
 	config: AutoModeConfig,
-	getApiKey: (provider: string) => Promise<string | undefined>,
+	getAuth: GetAuthFn,
 	signal?: AbortSignal,
 ): Promise<JudgeVerdict | null> {
 	if (!config.enabled) return null;
+
+	// Check rate-limit cooldown
+	if (Date.now() - lastRateLimitAt < RATE_LIMIT_COOLDOWN) {
+		return { safe: false, reason: "Judge rate-limited, retry later" };
+	}
 
 	// Check cache
 	const key = cacheKey(command, currentCwd);
 	const cached = cacheGet(key);
 	if (cached) return cached;
 
-	// Call judge
-	const verdict = await callJudge(command, currentCwd, config, getApiKey, signal);
-
-	// Only cache definitive verdicts (not rate limits/timeouts)
-	if (!verdict.reason.includes("rate-limited") && !verdict.reason.includes("timed out")) {
-		cacheSet(key, verdict);
+	// Resolve model through pi's registry
+	const model = getModel(config.judgeProvider, config.judgeModel);
+	if (!model) {
+		return { safe: false, reason: `Judge model ${config.judgeProvider}/${config.judgeModel} not found` };
 	}
 
-	return verdict;
+	// Resolve auth through pi's registry (handles OAuth, API keys, env vars)
+	const auth = await getAuth(model);
+	if (!auth.ok) {
+		return { safe: false, reason: `Judge auth failed: ${auth.error}` };
+	}
+	if (!auth.apiKey) {
+		return { safe: false, reason: `No API key for judge provider "${config.judgeProvider}"` };
+	}
+
+	try {
+		const userPrompt = `Project directory: ${currentCwd}\nCommand: ${command}\n\nIs this command safe to run?`;
+
+		// Use pi's SDK to call the model — handles streaming, auth, provider quirks
+		const timeoutController = new AbortController();
+		const timeout = setTimeout(() => timeoutController.abort(), config.judgeTimeout);
+
+		// Also abort if parent signal fires
+		if (signal) {
+			signal.addEventListener("abort", () => timeoutController.abort());
+		}
+
+		const response = await complete(
+			model,
+			{
+				systemPrompt: SYSTEM_PROMPT,
+				messages: [
+					{ role: "user", content: [{ type: "text", text: userPrompt }], timestamp: Date.now() },
+				],
+			},
+			{
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				signal: timeoutController.signal,
+			},
+		);
+
+		clearTimeout(timeout);
+
+		// Extract text from response
+		const text = response.content
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map((c) => c.text)
+			.join("\n")
+			.trim();
+
+		const verdict = parseVerdict(text);
+
+		// Cache definitive verdicts only
+		if (!verdict.reason.includes("unparseable") && !verdict.reason.includes("invalid JSON")) {
+			cacheSet(key, verdict);
+		}
+
+		return verdict;
+	} catch (error) {
+		if ((error as Error).name === "AbortError") {
+			return { safe: false, reason: "Judge timed out" };
+		}
+		const msg = (error as Error).message ?? String(error);
+		if (msg.includes("429") || msg.includes("rate")) {
+			lastRateLimitAt = Date.now();
+			return { safe: false, reason: "Judge rate-limited" };
+		}
+		return { safe: false, reason: `Judge error: ${msg}` };
+	}
 }
 
 /**
