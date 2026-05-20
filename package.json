@@ -7,7 +7,8 @@
     "sync": "npx tsx scripts/sync.ts",
     "sync:dry": "npx tsx scripts/sync.ts --dry-run",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "cleanup": "rm -rf ~/tmp/pi-test/ && rm -f ~/.pi/worktree-sessions/*.jsonl && echo 'Cleaned test artifacts'"
   },
   "devDependencies": {
     "tsx": "^4.0.0",
