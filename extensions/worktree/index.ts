@@ -324,7 +324,7 @@ function errorResult(message: string) {
 	return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true as const };
 }
 
-function formatAgentStatus(branch: string, client: ReturnType<typeof getAgent>!): string {
+function formatAgentStatus(branch: string, client: NonNullable<ReturnType<typeof getAgent>>): string {
 	const s = client.status;
 	return [
 		`## ${branch}`,
@@ -359,7 +359,7 @@ function buildFullReport(ctx: ExtensionContext): string {
 	return lines.join("\n");
 }
 
-async function collectResponse(client: ReturnType<typeof getAgent>): Promise<string> {
+async function collectResponse(client: NonNullable<ReturnType<typeof getAgent>>): Promise<string> {
 	return new Promise((resolve) => {
 		let text = "";
 		let settled = false;
