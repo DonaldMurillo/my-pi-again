@@ -1,0 +1,13 @@
+{
+  "name": "my-pi-extensions",
+  "version": "1.0.0",
+  "description": "Pi extensions framework: meta-skills, isolation, and more",
+  "private": true,
+  "scripts": {
+    "sync": "npx tsx scripts/sync.ts",
+    "sync:dry": "npx tsx scripts/sync.ts --dry-run"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}

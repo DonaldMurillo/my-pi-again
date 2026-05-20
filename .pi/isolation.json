@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "allowPaths": ["~/.pi/agent/extensions"],
+  "blockHomeDirectory": false,
+  "autoMode": true,
+  "judgeModel": "zai/glm-4.7-flash",
+  "judgeTimeout": 5000
+}

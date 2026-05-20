@@ -1,0 +1,7 @@
+{
+  "sources": [
+    { "root": "~/.claude/skills", "type": "claude" },
+    { "root": "~/.claude/plugin-skills", "type": "claude-plugin" },
+    { "root": ".claude/skills", "type": "claude" }
+  ]
+}
