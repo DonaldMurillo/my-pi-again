@@ -5,26 +5,28 @@
  * this module asks a fast model whether the command is actually safe
  * given the context (cwd, command, intent).
  *
+ * Uses pi's own model registry + SDK to resolve auth and make calls,
+ * so it works with any provider pi supports (OAuth, API keys, etc.).
+ *
  * Flow:
  *   restricted command → cache check → LLM judge → allow/block
  *
  * Config (in .pi/isolation.json):
  *   {
  *     "autoMode": true,
- *     "judgeModel": "zai/glm-4.7-flash",
- *     "judgeTimeout": 5000
+ *     "judgeProvider": "github-copilot",
+ *     "judgeModel": "gpt-5-mini",
+ *     "judgeTimeout": 8000
  *   }
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
 export interface AutoModeConfig {
 	enabled: boolean;
+	judgeProvider: string;
 	judgeModel: string;
 	judgeTimeout: number;
 }
@@ -43,13 +45,14 @@ interface CacheEntry {
 
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const CACHE_MAX = 200;
+const RATE_LIMIT_COOLDOWN = 30 * 1000; // 30 seconds — don't retry after 429
 
 const SYSTEM_PROMPT = `You are a security judge for a coding agent sandbox. Given a bash command and the project directory, decide if the command is SAFE or UNSAFE.
 
 Rules:
 - Commands that only READ or LIST files are SAFE (cat, ls, grep, rg, find, head, tail, git log, etc.)
-- Commands that install dependencies are SAFE (npm install, pnpm install, pip install, etc.)
-- Commands that run tests, linters, or build tools are SAFE (npm test, npm run build, eslint, tsc, etc.)
+- Commands that install dependencies are SAFE (npm install, pnpm install, pip install, brew install, etc.)
+- Commands that run tests, linters, or build tools are SAFE (npm test, npm run build, eslint, tsc, pytest, etc.)
 - Commands that write files WITHIN the project directory are SAFE
 - Commands that write files OUTSIDE the project directory are generally UNSAFE
 - Commands that delete system files or modify OS config are UNSAFE
@@ -57,6 +60,7 @@ Rules:
 - Commands that access credentials, secrets, or SSH keys are UNSAFE
 - Docker commands that build/run within project context are SAFE
 - Git operations (commit, push, pull, merge) are SAFE if within project
+- Package manager scripts (npm run, pnpm run) are SAFE
 
 Respond with EXACTLY this JSON format, nothing else:
 {"safe": true/false, "reason": "one sentence explanation"}`;
@@ -64,6 +68,7 @@ Respond with EXACTLY this JSON format, nothing else:
 // ─── Cache ───────────────────────────────────────────────────────────
 
 let cache = new Map<string, CacheEntry>();
+let lastRateLimitAt = 0;
 
 function cacheKey(command: string, cwd: string): string {
 	return createHash("sha256").update(`${cwd}:${command}`).digest("hex").slice(0, 16);
@@ -81,39 +86,42 @@ function cacheGet(key: string): JudgeVerdict | null {
 
 function cacheSet(key: string, verdict: JudgeVerdict): void {
 	if (cache.size >= CACHE_MAX) {
-		// Evict oldest
 		const oldest = cache.entries().next().value;
 		if (oldest) cache.delete(oldest[0]);
 	}
 	cache.set(key, { verdict, timestamp: Date.now() });
 }
 
-// ─── LLM call ───────────────────────────────────────────────────────
+// ─── LLM call via pi's model registry ───────────────────────────────
 
-async function callJudge(command: string, cwd: string, config: AutoModeConfig, signal?: AbortSignal): Promise<JudgeVerdict> {
-	const userPrompt = `Project directory: ${cwd}\nCommand: ${command}\n\nIs this command safe to run?`;
-
-	// Try to use pi's model registry via the OpenAI-compatible endpoint
-	// We make a direct HTTP request to avoid circular dependency on the extension API
-	const [provider, ...modelParts] = config.judgeModel.split("/");
-	const modelId = modelParts.join("/") || config.judgeModel;
-
-	// Resolve API key
-	const apiKey = resolveApiKey(provider);
-	if (!apiKey) {
-		return { safe: false, reason: `No API key found for judge provider "${provider}"` };
+async function callJudge(
+	command: string,
+	cwd: string,
+	config: AutoModeConfig,
+	getApiKey: (provider: string) => Promise<string | undefined>,
+	signal?: AbortSignal,
+): Promise<JudgeVerdict> {
+	// Check if we're in rate-limit cooldown
+	if (Date.now() - lastRateLimitAt < RATE_LIMIT_COOLDOWN) {
+		return { safe: false, reason: "Judge rate-limited, retry later" };
 	}
 
-	// Resolve base URL
-	const baseUrl = resolveBaseUrl(provider);
+	const userPrompt = `Project directory: ${cwd}\nCommand: ${command}\n\nIs this command safe to run?`;
+
+	// Resolve API key through pi's model registry (handles OAuth, env vars, auth.json)
+	const apiKey = await getApiKey(config.judgeProvider);
+	if (!apiKey) {
+		return { safe: false, reason: `No auth found for judge provider "${config.judgeProvider}"` };
+	}
+
+	// Resolve base URL based on provider
+	const baseUrl = getProviderBaseUrl(config.judgeProvider);
 	if (!baseUrl) {
-		return { safe: false, reason: `Unknown judge provider "${provider}"` };
+		return { safe: false, reason: `Unknown judge provider "${config.judgeProvider}"` };
 	}
 
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), config.judgeTimeout);
-
-	// Also abort if parent signal fires
 	if (signal) {
 		signal.addEventListener("abort", () => controller.abort());
 	}
@@ -126,7 +134,7 @@ async function callJudge(command: string, cwd: string, config: AutoModeConfig, s
 				"Authorization": `Bearer ${apiKey}`,
 			},
 			body: JSON.stringify({
-				model: modelId,
+				model: config.judgeModel,
 				messages: [
 					{ role: "system", content: SYSTEM_PROMPT },
 					{ role: "user", content: userPrompt },
@@ -137,6 +145,11 @@ async function callJudge(command: string, cwd: string, config: AutoModeConfig, s
 			}),
 			signal: controller.signal,
 		});
+
+		if (response.status === 429) {
+			lastRateLimitAt = Date.now();
+			return { safe: false, reason: "Judge rate-limited" };
+		}
 
 		if (!response.ok) {
 			return { safe: false, reason: `Judge API error: ${response.status}` };
@@ -159,7 +172,6 @@ async function callJudge(command: string, cwd: string, config: AutoModeConfig, s
 }
 
 function parseVerdict(raw: string): JudgeVerdict {
-	// Extract JSON from the response (model might add extra text)
 	const jsonMatch = raw.match(/\{[\s\S]*?"safe"[\s\S]*?\}/);
 	if (!jsonMatch) {
 		return { safe: false, reason: "Judge returned unparseable response" };
@@ -176,62 +188,38 @@ function parseVerdict(raw: string): JudgeVerdict {
 	}
 }
 
-// ─── API key / URL resolution ────────────────────────────────────────
+// ─── Provider URL resolution ─────────────────────────────────────────
 
-const PROVIDER_ENV_KEYS: Record<string, string> = {
-	zai: "ZAI_API_KEY",
-	openai: "OPENAI_API_KEY",
-	anthropic: "ANTHROPIC_API_KEY",
-	deepseek: "DEEPSEEK_API_KEY",
-	groq: "GROQ_API_KEY",
-	google: "GEMINI_API_KEY",
-};
-
-const PROVIDER_BASE_URLS: Record<string, string> = {
-	zai: "https://api.z.ai/api/coding/paas/v4",
-	openai: "https://api.openai.com/v1",
-	deepseek: "https://api.deepseek.com/v1",
-	groq: "https://api.groq.com/openai/v1",
-};
-
-function resolveApiKey(provider: string): string | null {
-	// Check auth.json first
-	const authPath = join(homedir(), ".pi", "agent", "auth.json");
-	if (existsSync(authPath)) {
-		try {
-			const auth = JSON.parse(readFileSync(authPath, "utf8")) as Record<string, any>;
-			const entry = auth[provider];
-			if (entry?.type === "api_key" && typeof entry.key === "string") {
-				return entry.key;
-			}
-		} catch { /* skip */ }
-	}
-
-	// Fall back to env var
-	const envKey = PROVIDER_ENV_KEYS[provider];
-	return envKey ? (process.env[envKey] ?? null) : null;
-}
-
-function resolveBaseUrl(provider: string): string | null {
-	return PROVIDER_BASE_URLS[provider] ?? null;
+function getProviderBaseUrl(provider: string): string | null {
+	const urls: Record<string, string> = {
+		"github-copilot": "https://api.githubcopilot.com/v1",
+		"openai": "https://api.openai.com/v1",
+		"zai": "https://api.z.ai/api/coding/paas/v4",
+		"deepseek": "https://api.deepseek.com/v1",
+		"groq": "https://api.groq.com/openai/v1",
+		"anthropic": "https://api.anthropic.com/v1",
+	};
+	return urls[provider] ?? null;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
 
 export const DEFAULT_AUTO_MODE: AutoModeConfig = {
 	enabled: true,
-	judgeModel: "zai/glm-4.7-flash",
-	judgeTimeout: 5000,
+	judgeProvider: "github-copilot",
+	judgeModel: "gpt-5-mini",
+	judgeTimeout: 8000,
 };
 
 /**
  * Ask the LLM judge if a restricted bash command is actually safe.
- * Returns null if auto-mode is disabled or the command is cached as unsafe.
+ * Returns null if auto-mode is disabled.
  */
 export async function judgeCommand(
 	command: string,
 	currentCwd: string,
 	config: AutoModeConfig,
+	getApiKey: (provider: string) => Promise<string | undefined>,
 	signal?: AbortSignal,
 ): Promise<JudgeVerdict | null> {
 	if (!config.enabled) return null;
@@ -242,10 +230,12 @@ export async function judgeCommand(
 	if (cached) return cached;
 
 	// Call judge
-	const verdict = await callJudge(command, currentCwd, config, signal);
+	const verdict = await callJudge(command, currentCwd, config, getApiKey, signal);
 
-	// Cache the result
-	cacheSet(key, verdict);
+	// Only cache definitive verdicts (not rate limits/timeouts)
+	if (!verdict.reason.includes("rate-limited") && !verdict.reason.includes("timed out")) {
+		cacheSet(key, verdict);
+	}
 
 	return verdict;
 }
@@ -255,4 +245,5 @@ export async function judgeCommand(
  */
 export function clearJudgeCache(): void {
 	cache.clear();
+	lastRateLimitAt = 0;
 }

@@ -81,6 +81,7 @@ function loadConfig(cwd: string): IsolationConfig {
 			allowPaths: parsed.allowPaths ?? DEFAULT_CONFIG.allowPaths,
 			blockHomeDirectory: parsed.blockHomeDirectory ?? DEFAULT_CONFIG.blockHomeDirectory,
 			autoMode: parsed.autoMode ?? DEFAULT_CONFIG.autoMode,
+			judgeProvider: parsed.judgeProvider ?? DEFAULT_AUTO_MODE.judgeProvider,
 			judgeModel: parsed.judgeModel ?? DEFAULT_CONFIG.judgeModel,
 			judgeTimeout: parsed.judgeTimeout ?? DEFAULT_CONFIG.judgeTimeout,
 		};
@@ -209,13 +210,18 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 				// No paths extracted — command is ambiguous
 				// If auto-mode is on, ask the judge
 				if (config.autoMode) {
-					const autoConfig: AutoModeConfig = {
-						enabled: config.autoMode,
-						judgeModel: config.judgeModel,
-						judgeTimeout: config.judgeTimeout,
-					};
-
-					const verdict = await judgeCommand(command, cwd, autoConfig, ctx.signal);
+					const verdict = await judgeCommand(
+						command,
+						cwd,
+						{
+							enabled: config.autoMode,
+							judgeProvider: config.judgeProvider,
+							judgeModel: config.judgeModel,
+							judgeTimeout: config.judgeTimeout,
+						},
+						(provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
+						ctx.signal,
+					);
 
 					if (verdict?.safe) {
 						judgeStats.allowed++;

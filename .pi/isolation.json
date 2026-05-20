@@ -3,6 +3,7 @@
   "allowPaths": ["~/.pi/agent/extensions"],
   "blockHomeDirectory": false,
   "autoMode": true,
-  "judgeModel": "zai/glm-5v-turbo",
+  "judgeProvider": "github-copilot",
+  "judgeModel": "gpt-5-mini",
   "judgeTimeout": 8000
 }
