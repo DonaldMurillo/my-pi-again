@@ -209,6 +209,10 @@ export async function judgeCommand(
 			.join("\n")
 			.trim();
 
+		if (!text) {
+			return { safe: false, reason: "Judge returned empty text response" };
+		}
+
 		const verdict = parseVerdict(text);
 
 		// Cache definitive verdicts only
