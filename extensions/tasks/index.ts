@@ -680,38 +680,18 @@ TaskArchive({ status }) — archive completed
 		if (!hasTodos && !hasTasks) {
 			ctx.ui.setWidget("tasks", undefined);
 			ctx.ui.setWidget("todos", undefined);
-			ctx.ui.setStatus("tasks", undefined);
 			return;
 		}
-
-		// ── Footer status ──
-		const parts: string[] = [];
-		if (hasTodos) {
-			const a = todos.filter((t) => t.status !== "completed").length;
-			const d = todos.filter((t) => t.status === "completed").length;
-			parts.push(`todo:${a}`);
-			if (d) parts.push(`done:${d}`);
-		}
-		if (hasTasks) {
-			const ip = tasks.filter((t) => t.status === "in_progress").length;
-			const p = tasks.filter((t) => t.status === "pending").length;
-			const b = tasks.filter((t) => t.status === "blocked").length;
-			const c = tasks.filter((t) => t.status === "completed").length;
-			if (ip) parts.push(`in-progress:${ip}`);
-			if (b) parts.push(`blocked:${b}`);
-			if (p) parts.push(`pending:${p}`);
-			if (c) parts.push(`done:${c}`);
-		}
-		ctx.ui.setStatus("tasks", `📋 ${parts.join(" ")}`);
 
 		// ── Todos widget (warm colors — warning/amber) ──
 		if (hasTodos) {
 			const activeTodos = todos.filter((t) => t.status !== "completed");
 			const doneTodos = todos.filter((t) => t.status === "completed");
+			const todoCounts = `${activeTodos.length} active${doneTodos.length ? `, ${doneTodos.length} done` : ""}`;
 
 			ctx.ui.setWidget("todos", (_tui: any, theme: Theme) => {
 				const themed: string[] = [];
-				themed.push(theme.fg("warning", theme.bold("todos")));
+				themed.push(theme.fg("warning", theme.bold(`todos (${todoCounts})`)));
 				for (let i = 0; i < Math.min(activeTodos.length, 3); i++) {
 					const t = activeTodos[i];
 					const icon = t.status === "in_progress" ? "●" : "○";
@@ -744,7 +724,16 @@ TaskArchive({ status }) — archive completed
 
 			ctx.ui.setWidget("tasks", (_tui: any, theme: Theme) => {
 				const themed: string[] = [];
-				themed.push(theme.fg("accent", theme.bold("tasks")));
+				const ip = tasks.filter((t) => t.status === "in_progress").length;
+				const bl = tasks.filter((t) => t.status === "blocked").length;
+				const pe = tasks.filter((t) => t.status === "pending").length;
+				const co = tasks.filter((t) => t.status === "completed").length;
+				const taskParts: string[] = [];
+				if (ip) taskParts.push(`${ip} active`);
+				if (bl) taskParts.push(`${bl} blocked`);
+				if (pe) taskParts.push(`${pe} pending`);
+				if (co) taskParts.push(`${co} done`);
+				themed.push(theme.fg("accent", theme.bold(`tasks (${taskParts.join(", ")})`)));
 				let count = 0;
 				for (const t of [...inProgress, ...blocked, ...pending]) {
 					if (count >= 3) break;
