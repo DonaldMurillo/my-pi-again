@@ -3,6 +3,6 @@
   "allowPaths": ["~/.pi/agent/extensions"],
   "blockHomeDirectory": false,
   "autoMode": true,
-  "judgeModel": "zai/glm-4.7-flash",
+  "judgeModel": "zai/glm-5v-turbo",
   "judgeTimeout": 8000
 }
