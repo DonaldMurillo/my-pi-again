@@ -31,6 +31,7 @@ The test suite should exercise the FULL pipeline: prompt → agent → tool call
 | `context-viewer` | `/context` overlay showing token usage breakdown |
 | `custom-pi` | `/custom-pi` overlay showing git branch, model, isolation config |
 | `file-viewer` | Syntax-highlighted file overlay with scroll, search, mouse clicks |
+| `tasks` | Persistent task management (TodoWrite, TaskCreate, TaskUpdate, TaskGet, TaskList, TaskNext, TaskSearch, TaskArchive) |
 
 ## Quick start
 
