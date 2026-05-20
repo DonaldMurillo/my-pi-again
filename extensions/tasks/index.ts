@@ -535,6 +535,50 @@ TaskArchive({ status }) — archive completed
 		}
 	});
 
+	// ── Per-turn nudge: remind agent to use task tools ──
+
+	pi.on("context", async (event, ctx) => {
+		// Only nudge on first turn of a prompt (turnIndex 0)
+		// Check if there's a user message asking for work
+		const msgs = event.messages;
+		if (!msgs || msgs.length === 0) return;
+
+		// Look for a user message in this turn
+		const lastUserMsg = [...msgs].reverse().find((m: any) => m.role === "user");
+		if (!lastUserMsg) return;
+
+		const text = typeof lastUserMsg.content === "string"
+			? lastUserMsg.content
+			: Array.isArray(lastUserMsg.content)
+				? lastUserMsg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ")
+				: "";
+
+		if (!text || text.startsWith("/")) return; // Skip commands
+
+		// Check if any task tool has been called in this conversation
+		const taskToolNames = new Set([
+			"TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+			"TaskSearch", "TaskNext", "TaskDecompose", "TaskArchive",
+		]);
+		const hasUsedTaskTools = msgs.some((m: any) =>
+			m.role === "assistant" && Array.isArray(m.content) &&
+			m.content.some((c: any) => c.type === "toolCall" && taskToolNames.has(c.name)),
+		);
+
+		if (hasUsedTaskTools) return; // Agent already using task tools — leave it alone
+
+		// Inject a nudge at the end of messages
+		const nudges = [
+			"[TASK NUDGE] You have not used TodoWrite or TaskCreate yet. If the user's request has multiple steps, create a plan first.",
+		];
+
+		event.messages.push({
+			role: "user",
+			content: nudges[0],
+			customType: "task-nudge",
+		});
+	});
+
 	// ── Stop hook: warn if incomplete tasks ──
 
 	pi.on("stop", async (_event, ctx) => {
