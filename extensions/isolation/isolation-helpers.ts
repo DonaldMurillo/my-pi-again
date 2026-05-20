@@ -90,6 +90,12 @@ const ALLOWED_COMMAND_PATTERNS = [
 	/^\s*\[\s/,
 	/^\s*printf\b/,
 	/^\s*touch\b/,
+	/^\s*git\s+worktree\b/,		// git worktree management
+	/^\s*git\s+branch\b/,		// git branch ops (non-destructive)
+	/^\s*git\s+log\b/,			// git log
+	/^\s*git\s+status\b/,		// git status
+	/^\s*git\s+stash\b/,		// git stash
+	/^\s*git\s+remote\b/,		// git remote
 	/^\s*ln\s+-s\b/			// symlink (not -sf force)
 ];
 
