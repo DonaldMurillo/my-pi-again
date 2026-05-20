@@ -160,9 +160,8 @@ export class MessageBus {
 		this.watchTimer = setInterval(() => {
 			const currentCount = this.countUnread();
 			if (currentCount > lastCount) {
-				// New messages arrived
-				const all = this.readInbox();
-				const unread = all.filter((m) => !m.read);
+				// Use readUnread which returns AND marks messages
+				const unread = this.readUnread();
 				for (const msg of unread) {
 					for (const h of this.handlers) {
 						try { h(msg); } catch { /* ignore */ }

@@ -26,7 +26,7 @@ const SAFE_BASH_PATTERNS = [
 	/^\s*echo\b/,
 	/^\s*node\s+--test\b/,
 	/^\s*npm\s+(test|run|list)/,
-	/^\s*npx\s+/,
+	/^\s*npx\s+(tsx|vitest|vite|eslint|prettier|tsc)\b/,	// only known-safe npx packages
 	/^\s*pnpm\s+(test|run|list|install|add|remove)\b/,
 	/^\s*pnpm\s+(exec|dlx)\s+/,
 	/^\s*which\b/,
@@ -37,8 +37,8 @@ const SAFE_BASH_PATTERNS = [
 	/^\s*pwd\b/,
 	/^\s*env\b/,
 	/^\s*printenv\b/,
-	/^\s*curl\s+-/,
-	/^\s*mkdir\s+-p\b/,
+	/^\s*curl\s+(?!.*(?:-o\s|--output)).*-/,	// curl with flags but NOT -o/--output
+	/^\s*mkdir\s+-p\s+\.\//	// mkdir -p only within cwd (starts with ./)
 ];
 
 // Patterns that indicate file writing/deletion in bash
@@ -89,7 +89,6 @@ const ALLOWED_COMMAND_PATTERNS = [
 	/^\s*test\b/,
 	/^\s*\[\s/,
 	/^\s*printf\b/,
-	/^\s*touch\b/,
 	/^\s*ln\s+-s\b/			// symlink (not -sf force)
 ];
 
@@ -110,7 +109,6 @@ const INTERPRETER_PATTERNS = [
 // These would break the system or cause irrecoverable damage.
 const HARDFORBIDDEN_PATHS = [
 	/\.git(?:\/|$)/,			// git repo integrity
-	/\.gitignore$/,			// project config (but allow gitignore edits within cwd)
 	/\.ssh(?:\/|$)/,			// SSH keys
 	/System\/Library/,		// macOS system
 	/\/usr\//,				// Unix system
@@ -121,7 +119,7 @@ const HARDFORBIDDEN_PATHS = [
 	/\/System\//,
 	/\/Applications\//,
 	/\/Library\//,
-	/\b\/Users\/dom\/Library\//,
+	/\/Users\/dom\/Library\//,	// TODO: use homedir() instead of hardcoded username
 	/\b\.pi\/agent\/extensions\/index\.ts$/,	// don't nuke own extensions
 ];
 

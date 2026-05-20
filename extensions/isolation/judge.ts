@@ -57,7 +57,7 @@ Rules:
 - Git operations (commit, push, pull, merge) are SAFE if within project
 - Package manager scripts (npm run, pnpm run) are SAFE
 
-Respond with EXACTLY this JSON format, nothing else. No markdown, no explanation, no code blocks:
+Respond with EXACTLY this JSON format, nothing else. No markdown, no explanation, no code blocks. Do NOT repeat or echo the command.
 {"safe": true/false, "reason": "one sentence explanation"}`;
 
 // ─── Cache ───────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ function parseVerdict(raw: string): JudgeVerdict {
 		/\{[\s\S]*?"safe"[\s\S]*?\}/,				// loose JSON
 	];
 
+	// Only parse the FIRST valid JSON match to prevent injection via echoed content
 	for (const pattern of jsonPatterns) {
 		const match = raw.match(pattern);
 		if (!match) continue;
@@ -174,7 +175,10 @@ export async function judgeCommand(
 	}
 
 	try {
-		const userPrompt = `Project directory: ${currentCwd}\nCommand: ${command}\n\nIs this command safe to run?`;
+		const userPrompt = `Project directory: ${currentCwd}
+<command>${command}</command>
+
+Is this command safe to run? Respond with JSON only.`;
 
 		// Use pi's SDK to call the model — handles streaming, auth, provider quirks
 		const timeoutController = new AbortController();
@@ -215,8 +219,8 @@ export async function judgeCommand(
 
 		const verdict = parseVerdict(text);
 
-		// Cache definitive verdicts only
-		if (!verdict.reason.includes("unparseable") && !verdict.reason.includes("invalid JSON")) {
+		// Cache ONLY unsafe verdicts — safe verdicts re-evaluate to prevent cache poisoning
+		if (!verdict.safe) {
 			cacheSet(key, verdict);
 		}
 

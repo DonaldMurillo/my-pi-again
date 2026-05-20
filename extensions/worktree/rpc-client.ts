@@ -101,6 +101,18 @@ export class RpcClient {
 		const sessionDir = join(homedir(), ".pi", "worktree-sessions");
 		if (!existsSync(sessionDir)) mkdirSync(sessionDir, { recursive: true });
 
+		// Whitelist env vars — don't leak secrets to worktree agents
+		const safeEnv: Record<string, string> = {};
+		for (const key of ["PATH", "HOME", "USER", "LANG", "TERM", "SHELL", "TMPDIR", "NODE_PATH"]) {
+			if (process.env[key]) safeEnv[key] = process.env[key]!;
+		}
+		// Pi-specific vars needed for model resolution
+		for (const key of Object.keys(process.env)) {
+			if (key.startsWith("PI_") || key.startsWith("ZAI_")) {
+				safeEnv[key] = process.env[key]!;
+			}
+		}
+
 		const proc = spawn("pi", [
 			"--mode", "rpc",
 			"--session-dir", sessionDir,
@@ -108,7 +120,7 @@ export class RpcClient {
 			cwd: this.worktreePath,
 			shell: false,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env },
+		env: safeEnv,
 		});
 
 		this.proc = proc;
@@ -308,7 +320,10 @@ export class RpcClient {
 
 	private send(obj: Record<string, unknown>): void {
 		if (!this.proc?.stdin?.writable) return;
-		this.proc.stdin.write(JSON.stringify(obj) + "\n");
+		const payload = JSON.stringify(obj);
+		// Sanitize — strip literal newlines to prevent RPC command injection
+		const safe = payload.replace(/\n/g, "\\n");
+		this.proc.stdin.write(safe + "\n");
 	}
 
 	// ── Cleanup ──

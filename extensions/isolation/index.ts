@@ -55,6 +55,7 @@ interface IsolationConfig {
 	allowPaths: string[];
 	blockHomeDirectory: boolean;
 	autoMode: boolean;
+	judgeProvider: string;
 	judgeModel: string;
 	judgeTimeout: number;
 }
