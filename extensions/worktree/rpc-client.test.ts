@@ -14,8 +14,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const skip = !process.env.SKIP_RPC_TESTS && !process.env.CI;
-const skipIf = skip ? describe.skip : describe;
+const skip = false;
 
 let testDir: string;
 let repoDir: string;
@@ -36,7 +35,7 @@ afterAll(() => {
 	try { rmSync(testDir, { recursive: true, force: true }); } catch {}
 });
 
-skipIf("RpcClient", () => {
+describe("RpcClient", () => {
 	let client: RpcClient;
 
 	beforeAll(async () => {

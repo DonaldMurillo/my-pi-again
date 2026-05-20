@@ -18,7 +18,7 @@ import {
 	getRepoRoot,
 } from "./worktree-manager.js";
 
-const skip = !process.env.SKIP_RPC_TESTS && !process.env.CI;
+const skip = false;
 const skipIf = skip ? describe.skip : describe;
 
 let testDir: string;
