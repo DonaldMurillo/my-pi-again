@@ -5,9 +5,12 @@
   "private": true,
   "scripts": {
     "sync": "npx tsx scripts/sync.ts",
-    "sync:dry": "npx tsx scripts/sync.ts --dry-run"
+    "sync:dry": "npx tsx scripts/sync.ts --dry-run",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
-    "tsx": "^4.0.0"
+    "tsx": "^4.0.0",
+    "vitest": "^4.1.7"
   }
 }
