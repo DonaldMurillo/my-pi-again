@@ -2,14 +2,15 @@
  * E2E test for inter-worktree orchestration.
  *
  * Tests the full flow: create → spawn → send → collect → coordinate.
- * Requires SKIP_RPC_TESTS=1 to run (costs API tokens).
+ * Costs API tokens. Uses try/finally for guaranteed cleanup.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
 import { RpcClient } from "./rpc-client.js";
 import {
 	createWorktree,
@@ -18,37 +19,33 @@ import {
 	getRepoRoot,
 } from "./worktree-manager.js";
 
-const skip = false;
-const skipIf = skip ? describe.skip : describe;
-
 let testDir: string;
 let repoDir: string;
+const agents: RpcClient[] = [];
 
-beforeAll(() => {
-	testDir = mkdtempSync(join(tmpdir(), "wt-e2e-"));
-	repoDir = join(testDir, "repo");
-
-	execSync(`git init "${repoDir}"`, { encoding: "utf8" });
-	execSync(`git -C "${repoDir}" config user.email "test@test.com"`);
-	execSync(`git -C "${repoDir}" config user.name "Test"`);
-	writeFileSync(join(repoDir, "README.md"), "# test");
-	execSync(`git -C "${repoDir}" add -A`);
-	execSync(`git -C "${repoDir}" commit -m "initial"`);
-});
-
+// Global safety net — kills any surviving agents and removes test dir
 afterAll(() => {
-	try { rmSync(testDir, { recursive: true, force: true }); } catch {}
+	for (const a of agents) {
+		try { a.kill(); } catch {}
+	}
+	agents.length = 0;
+	if (testDir) {
+		try { rmSync(testDir, { recursive: true, force: true }); } catch {}
+	}
 });
 
-skipIf("inter-worktree orchestration", () => {
-	const agents = new Map<string, RpcClient>();
-
-	afterAll(() => {
-		for (const [, a] of agents) a.kill();
-		agents.clear();
-	});
-
+describe("inter-worktree orchestration", () => {
 	it("creates two worktrees", () => {
+		testDir = mkdtempSync(join(tmpdir(), "wt-e2e-"));
+		repoDir = join(testDir, "repo");
+
+		execSync(`git init "${repoDir}"`, { encoding: "utf8" });
+		execSync(`git -C "${repoDir}" config user.email "test@test.com"`);
+		execSync(`git -C "${repoDir}" config user.name "Test"`);
+		writeFileSync(join(repoDir, "README.md"), "# test");
+		execSync(`git -C "${repoDir}" add -A`);
+		execSync(`git -C "${repoDir}" commit -m "initial"`);
+
 		createWorktree(repoDir, "e2e-alpha", "test agent alpha");
 		createWorktree(repoDir, "e2e-beta", "test agent beta");
 
@@ -66,7 +63,7 @@ skipIf("inter-worktree orchestration", () => {
 			"test agent alpha",
 		);
 		await alpha.start();
-		agents.set("e2e-alpha", alpha);
+		agents.push(alpha);
 
 		const beta = new RpcClient(
 			join(root, ".pi", "worktrees", "e2e-beta"),
@@ -74,15 +71,15 @@ skipIf("inter-worktree orchestration", () => {
 			"test agent beta",
 		);
 		await beta.start();
-		agents.set("e2e-beta", beta);
+		agents.push(beta);
 
 		expect(alpha.status.state).toBe("idle");
 		expect(beta.status.state).toBe("idle");
 	}, 60_000);
 
 	it("sends independent tasks to both agents", async () => {
-		const alpha = agents.get("e2e-alpha")!;
-		const beta = agents.get("e2e-beta")!;
+		const alpha = agents[0];
+		const beta = agents[1];
 
 		const [alphaResp, betaResp] = await Promise.all([
 			alpha.prompt("Write a file called result.txt containing the word ALPHA. Use the write tool."),
@@ -104,31 +101,30 @@ skipIf("inter-worktree orchestration", () => {
 
 		expect(alphaContent).toContain("ALPHA");
 		expect(betaContent).toContain("BETA");
-		// Verify isolation — each worktree got its own content
 		expect(alphaContent).not.toContain("BETA");
 		expect(betaContent).not.toContain("ALPHA");
 	});
 
 	it("main session can send follow-up to a specific agent", async () => {
-		const alpha = agents.get("e2e-alpha")!;
+		const alpha = agents[0];
 
 		await alpha.prompt("Read the file result.txt and confirm it contains ALPHA");
-		// If we got here without error, the agent could read its own file
 		expect(alpha.status.turnCount).toBeGreaterThanOrEqual(2);
 	}, 60_000);
 
 	it("tracks costs or turn counts across agents", () => {
-		const alpha = agents.get("e2e-alpha")!;
-		const beta = agents.get("e2e-beta")!;
+		const alpha = agents[0];
+		const beta = agents[1];
 
-		// Cost tracking depends on provider reporting usage
-		const totalCost = alpha.status.totalCost + beta.status.totalCost;
 		const totalTurns = alpha.status.turnCount + beta.status.turnCount;
 		expect(totalTurns).toBeGreaterThan(0);
 	});
 
 	it("kills agents and cleans up worktrees", () => {
-		for (const [, a] of agents) a.kill();
+		for (const a of agents) {
+			try { a.kill(); } catch {}
+		}
+		agents.length = 0;
 
 		removeWorktree(repoDir, "e2e-alpha");
 		removeWorktree(repoDir, "e2e-beta");
@@ -136,5 +132,8 @@ skipIf("inter-worktree orchestration", () => {
 		const wts = listWorktrees(repoDir);
 		expect(wts.find((w) => w.branch === "e2e-alpha")).toBeUndefined();
 		expect(wts.find((w) => w.branch === "e2e-beta")).toBeUndefined();
+
+		// Clean up test dir immediately
+		try { rmSync(testDir, { recursive: true, force: true }); } catch {}
 	});
 });

@@ -18,6 +18,7 @@ const skip = false;
 
 let testDir: string;
 let repoDir: string;
+let client: RpcClient | null = null;
 
 beforeAll(() => {
 	testDir = mkdtempSync(join(tmpdir(), "rpc-test-"));
@@ -32,41 +33,36 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+	try { client?.kill(); } catch {}
 	try { rmSync(testDir, { recursive: true, force: true }); } catch {}
 });
 
 describe("RpcClient", () => {
-	let client: RpcClient;
-
 	beforeAll(async () => {
 		client = new RpcClient(repoDir, "test", "integration test");
 		await client.start();
 	}, 30_000);
 
-	afterAll(() => {
-		client?.kill();
-	});
-
 	it("starts and reports idle status", () => {
-		expect(client.status.state).toBe("idle");
-		expect(client.pid).toBeDefined();
+		expect(client!.status.state).toBe("idle");
+		expect(client!.pid).toBeDefined();
 	});
 
 	it("responds to getState", async () => {
-		const resp = await client.getState();
+		const resp = await client!.getState();
 		expect(resp.success).toBe(true);
 		expect(resp.data).toBeDefined();
 	});
 
 	it("handles a simple prompt", async () => {
-		const resp = await client.prompt("Respond with exactly: RPC_TEST_OK");
+		const resp = await client!.prompt("Respond with exactly: RPC_TEST_OK");
 		expect(resp.success).toBe(true);
 	}, 60_000);
 
 	it("collects streaming text from agent", async () => {
 		let collected = "";
 
-		const unsub = client.onEvent((event) => {
+		const unsub = client!.onEvent((event) => {
 			if (event.type === "message_update") {
 				const delta = (event as any).assistantMessageEvent;
 				if (delta?.type === "text_delta" && delta?.delta) {
@@ -75,25 +71,24 @@ describe("RpcClient", () => {
 			}
 		});
 
-		await client.prompt("Say hello in exactly 3 words");
+		await client!.prompt("Say hello in exactly 3 words");
 		unsub();
 		expect(collected.length).toBeGreaterThan(0);
 	}, 60_000);
 
 	it("reports agent_end after prompt completes", async () => {
-		// prompt() now waits for agent_end internally
-		await client.prompt("Say OK");
-		expect(client.status.state).toBe("idle");
+		await client!.prompt("Say OK");
+		expect(client!.status.state).toBe("idle");
 	}, 60_000);
 
 	it("tracks turn count", async () => {
-		const before = client.status.turnCount;
-		await client.prompt("Say OK");
-		expect(client.status.turnCount).toBeGreaterThan(before);
+		const before = client!.status.turnCount;
+		await client!.prompt("Say OK");
+		expect(client!.status.turnCount).toBeGreaterThan(before);
 	}, 60_000);
 
 	it("can be killed", () => {
-		client.kill();
-		expect(client.status.state).toBe("dead");
+		client!.kill();
+		expect(client!.status.state).toBe("dead");
 	});
 });
