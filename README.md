@@ -2,6 +2,10 @@
 
 Pi extensions framework. Source of truth — sync to `~/.pi/agent/extensions/` for deployment.
 
+## Documentation
+
+- [Agent Idle Detection](docs/idle-detection.md) — How to reliably detect when the agent is done responding
+
 ## Extensions
 
 | Extension | Description |
