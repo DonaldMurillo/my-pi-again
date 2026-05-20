@@ -233,7 +233,20 @@ export class RpcClient {
 
 	async prompt(message: string): Promise<RpcResponse> {
 		this._status = { ...this._status, state: "working" };
-		return this.sendCommand("prompt", { message });
+		const resp = await this.sendCommand("prompt", { message });
+		if (!resp.success) return resp;
+
+		// Wait for agent_end before resolving so the caller gets the full response
+		await new Promise<void>((resolve) => {
+			const unsub = this.onEvent((event) => {
+				if (event.type === "agent_end") {
+					unsub();
+					resolve();
+				}
+			});
+		});
+
+		return resp;
 	}
 
 	async steer(message: string): Promise<RpcResponse> {

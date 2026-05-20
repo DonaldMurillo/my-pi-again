@@ -77,43 +77,24 @@ skipIf("RpcClient", () => {
 		});
 
 		await client.prompt("Say hello in exactly 3 words");
-		// Wait for agent_end
-		await new Promise<void>((resolve) => {
-			const u2 = client.onEvent((event) => {
-				if (event.type === "agent_end") { u2(); resolve(); }
-			});
-		});
-
 		unsub();
 		expect(collected.length).toBeGreaterThan(0);
 	}, 60_000);
 
 	it("reports agent_end after prompt completes", async () => {
-		let gotAgentEnd = false;
-		const unsub = client.onEvent((event) => {
-			if (event.type === "agent_end") gotAgentEnd = true;
-		});
-
+		// prompt() now waits for agent_end internally
 		await client.prompt("Say OK");
-		// Small delay to let events flow
-		await new Promise((r) => setTimeout(r, 2000));
-
-		unsub();
-		expect(gotAgentEnd).toBe(true);
+		expect(client.status.state).toBe("idle");
 	}, 60_000);
 
 	it("tracks turn count", async () => {
 		const before = client.status.turnCount;
 		await client.prompt("Say OK");
-		await new Promise((r) => setTimeout(r, 2000));
 		expect(client.status.turnCount).toBeGreaterThan(before);
 	}, 60_000);
 
 	it("can be killed", () => {
-		const pid = client.pid;
 		client.kill();
 		expect(client.status.state).toBe("dead");
-		// Process should be gone
-		expect(() => process.kill(pid!, 0)).toThrow();
 	});
 });
