@@ -27,7 +27,7 @@ const SAFE_BASH_PATTERNS = [
 	/^\s*node\s+--test\b/,
 	/^\s*npm\s+(test|run|list)/,
 	/^\s*npx\s+/,
-	/^\s*pnpm\s+(test|run|list)/,
+	/^\s*pnpm\s+(test|run|list|install|add|remove)\b/,
 	/^\s*pnpm\s+(exec|dlx)\s+/,
 	/^\s*which\b/,
 	/^\s*type\b/,
@@ -109,18 +109,18 @@ const INTERPRETER_PATTERNS = [
 // Paths that are ALWAYS blocked, even within cwd. Cannot be overridden.
 // These would break the system or cause irrecoverable damage.
 const HARDFORBIDDEN_PATHS = [
-	/\b\.git\b/,				// git repo integrity
-	/\b\.gitignore$/,		// project config
-	/\b\.ssh\//,				// SSH keys
-	/\bSystem\/Library\b/,	// macOS system
-	/\b\/usr\//,				// Unix system
-	/\b\/bin\//,				// system binaries
-	/\b\/sbin\//,
-	/\b\/etc\//,
-	/\b\/var\//,
-	/\b\/System\//,
-	/\b\/Applications\//,
-	/\b\/Library\//,
+	/\.git(?:\/|$)/,			// git repo integrity
+	/\.gitignore$/,			// project config (but allow gitignore edits within cwd)
+	/\.ssh(?:\/|$)/,			// SSH keys
+	/System\/Library/,		// macOS system
+	/\/usr\//,				// Unix system
+	/\/bin\/(?:[^/]|$)/,		// system binaries
+	/\/sbin\/(?:[^/]|$)/,
+	/\/etc\/(?:[^/]|$)/,
+	/\/var\//,
+	/\/System\//,
+	/\/Applications\//,
+	/\/Library\//,
 	/\b\/Users\/dom\/Library\//,
 	/\b\.pi\/agent\/extensions\/index\.ts$/,	// don't nuke own extensions
 ];
@@ -169,6 +169,12 @@ export function isBashCommandRestricted(command: string): boolean {
 	// Interpreted languages (node, python, bun, etc.) can do anything — always restrict
 	if (INTERPRETER_PATTERNS.some((p) => p.test(command))) {
 		return true;
+	}
+	// Package managers are always allowed (npm/pnpm/yarn install/run/etc)
+	// Check this BEFORE destructive patterns since `install` is in destructive
+	const packageManagers = /^\s*(?:npm|pnpm|yarn|bun)\s/;
+	if (packageManagers.test(command)) {
+		return false;
 	}
 	// If explicitly destructive, always restricted
 	if (DESTRUCTIVE_BASH_PATTERNS.some((p) => p.test(command))) {
