@@ -126,6 +126,8 @@ class EventBus {
 
 	resetState(): void { this._state = defaultState(); }
 
+	removeAllListeners(): void { this.emitter.removeAllListeners(); }
+
 	get history(): ReadonlyArray<HistoryEntry> { return this._history; }
 	clearHistory(): void { this._history = []; }
 
