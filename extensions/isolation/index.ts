@@ -198,7 +198,7 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 							return { block: true, reason: `Isolation: path "${p}" is hard-forbidden (system-critical). Cannot be overridden.` };
 						}
 
-						const check = checkPath(p.startsWith("__RECURS__:") ? p.replace("__RECURSIVE__:", "") : p);
+						const check = checkPath(p.replace("__RECURSIVE__:", ""));
 						if (!check.allowed) {
 							return { block: true, reason: check.reason };
 						}
