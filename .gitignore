@@ -3,3 +3,6 @@ node_modules/
 
 # Worktree sandboxes
 .pi/worktrees/
+
+# Inter-agent messages
+.pi/messages/
