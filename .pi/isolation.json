@@ -4,6 +4,6 @@
   "blockHomeDirectory": false,
   "autoMode": true,
   "judgeProvider": "zai",
-  "judgeModel": "glm-4.7-flash",
+  "judgeModel": "glm-4.5-air",
   "judgeTimeout": 8000
 }

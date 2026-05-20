@@ -219,6 +219,7 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 							judgeModel: config.judgeModel,
 							judgeTimeout: config.judgeTimeout,
 						},
+						(provider, modelId) => ctx.modelRegistry.find(provider, modelId),
 						(model) => ctx.modelRegistry.getApiKeyAndHeaders(model),
 						ctx.signal,
 					);

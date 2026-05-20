@@ -14,7 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { complete, getModel } from "@mariozechner/pi-ai";
+import { complete } from "@mariozechner/pi-ai";
 import type { Model, Api } from "@mariozechner/pi-ai";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -111,10 +111,11 @@ function parseVerdict(raw: string): JudgeVerdict {
 export const DEFAULT_AUTO_MODE: AutoModeConfig = {
 	enabled: true,
 	judgeProvider: "zai",
-	judgeModel: "glm-4.7-flash",
+	judgeModel: "glm-4.5-air",
 	judgeTimeout: 8000,
 };
 
+type FindModelFn = (provider: string, modelId: string) => Model<Api> | undefined;
 type GetAuthFn = (model: Model<Api>) => Promise<{
 	ok: true;
 	apiKey?: string;
@@ -132,6 +133,7 @@ export async function judgeCommand(
 	command: string,
 	currentCwd: string,
 	config: AutoModeConfig,
+	findModel: FindModelFn,
 	getAuth: GetAuthFn,
 	signal?: AbortSignal,
 ): Promise<JudgeVerdict | null> {
@@ -148,7 +150,7 @@ export async function judgeCommand(
 	if (cached) return cached;
 
 	// Resolve model through pi's registry
-	const model = getModel(config.judgeProvider, config.judgeModel);
+	const model = findModel(config.judgeProvider, config.judgeModel);
 	if (!model) {
 		return { safe: false, reason: `Judge model ${config.judgeProvider}/${config.judgeModel} not found` };
 	}
