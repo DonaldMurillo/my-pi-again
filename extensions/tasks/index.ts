@@ -463,16 +463,50 @@ If the user gives you work with more than one step and you are NOT calling TodoW
 you are violating a core behavioral rule. Create the plan FIRST, then do the work.
 </CRITICAL>
 
+<RULE name="create_full_plan_upfront">
+When you call TodoWrite or TaskCreate, you MUST create ALL steps upfront in a single call.
+Do NOT create step 1, complete it, then create steps 2 and 3. The user must see the full plan
+before you start any work. Every step the user asked for must be visible from the first call.
+
+WRONG:
+  TodoWrite({ todos: [{ content: "Step 1", status: "in_progress" }] })
+  // ... do step 1 ...
+  TodoWrite({ todos: [{ content: "Step 1", status: "completed" }, { content: "Step 2", status: "pending" }] })
+  // ^^^ VIOLATION: step 2 was not in the original plan
+
+CORRECT:
+  TodoWrite({ todos: [
+    { content: "Step 1", status: "in_progress" },
+    { content: "Step 2", status: "pending" },
+    { content: "Step 3", status: "pending" }
+  ] })
+  // ... do step 1 ...
+  TodoWrite({ todos: [
+    { content: "Step 1", status: "completed" },
+    { content: "Step 2", status: "in_progress" },
+    { content: "Step 3", status: "pending" }
+  ] })
+</RULE>
+
+<RULE name="each_step_is_real_work">
+Each todo step must describe a REAL action you will take, not a label to check off.
+"Research a joke" means actually running a command or reading something to find one.
+"Tell the joke" means outputting just the joke, nothing else.
+"Deliver the punchline" means outputting just the punchline.
+
+Do NOT combine steps. Do NOT do the work before updating the todo. Do NOT mark done without doing the work.
+</RULE>
+
 <RULE name="before_work">
-1. User gives multiple things to do → call TodoWrite FIRST with the full plan
-2. User asks for a feature or complex change → call TaskCreate BEFORE touching any code
-3. You identify sub-steps → call TaskDecompose or create subtasks with parentTaskId
+1. User gives multiple things to do → TodoWrite with ALL steps in one call, then start work
+2. User asks for a feature or complex change → TaskCreate BEFORE touching any code
+3. You identify sub-steps → TaskCreate with parentTaskId for each, all at once
 </RULE>
 
 <RULE name="during_work">
-4. Starting a task → TaskUpdate({ taskId, status: "in_progress" })
-5. Finishing a task → TaskUpdate({ taskId, status: "completed" })
-6. Blocked on something → TaskUpdate({ taskId, status: "blocked" })
+4. Starting a step → update todo to "in_progress"
+5. Finishing a step → update todo to "completed", set next to "in_progress"
+6. Blocked → update to "blocked"
 </RULE>
 
 <EXAMPLE trigger="user says 'fix the bug and add tests'">
@@ -492,14 +526,30 @@ TodoWrite({ todos: [
 ] })
 </EXAMPLE>
 
-<EXAMPLE trigger="user says 'implement auth with login, signup, and OAuth'">
-TaskCreate({ subject: "Auth system", priority: "high", labels: ["auth"] })
-TaskDecompose({ taskId, subtasks: [
-  { subject: "Login endpoint" },
-  { subject: "Signup endpoint" },
-  { subject: "OAuth integration" }
+<EXAMPLE trigger="user says 'research a joke, tell it, then deliver the punchline'">
+TodoWrite({ todos: [
+  { content: "Research: find a joke online", status: "in_progress", activeForm: "Researching joke" },
+  { content: "Tell the joke setup", status: "pending" },
+  { content: "Deliver the punchline", status: "pending" }
 ] })
-// Work through each subtask, updating status as you go
+// ... actually look up a joke via bash curl ...
+TodoWrite({ todos: [
+  { content: "Research: find a joke online", status: "completed" },
+  { content: "Tell the joke setup", status: "in_progress" },
+  { content: "Deliver the punchline", status: "pending" }
+] })
+// ... output ONLY the joke setup ...
+TodoWrite({ todos: [
+  { content: "Research: find a joke online", status: "completed" },
+  { content: "Tell the joke setup", status: "completed" },
+  { content: "Deliver the punchline", status: "in_progress" }
+] })
+// ... output ONLY the punchline ...
+TodoWrite({ todos: [
+  { content: "Research: find a joke online", status: "completed" },
+  { content: "Tell the joke setup", status: "completed" },
+  { content: "Deliver the punchline", status: "completed" }
+] })
 </EXAMPLE>
 
 <tools>
@@ -516,7 +566,6 @@ TaskArchive({ status }) — archive completed
 </task_management>
 `;
 	});
-
 
 	pi.on("session_start", async (_event, ctx) => {
 		const store = loadStore(ctx.cwd);
