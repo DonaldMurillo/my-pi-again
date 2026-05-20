@@ -6,3 +6,5 @@ node_modules/
 
 # Inter-agent messages
 .pi/messages/
+
+.pi/tasks/
