@@ -560,6 +560,104 @@ to manage tasks manually.
 		}
 	});
 
+	// ── Persistent task widget + status ──
+
+	function refreshWidget(ctx: ExtensionContext): void {
+		const store = loadStore(ctx.cwd);
+		const tasks = Object.values(store.tasks).filter((t) => t.status !== "deleted");
+
+		if (tasks.length === 0) {
+			ctx.ui.setWidget("tasks", undefined);
+			ctx.ui.setStatus("tasks", undefined);
+			return;
+		}
+
+		const inProgress = tasks.filter((t) => t.status === "in_progress");
+		const pending = tasks.filter((t) => t.status === "pending");
+		const blocked = tasks.filter((t) => t.status === "blocked");
+		const completed = tasks.filter((t) => t.status === "completed");
+		const review = tasks.filter((t) => t.status === "review");
+		const active = inProgress.length + pending.length + blocked.length + review.length;
+
+		// Footer status — compact counts
+		const parts: string[] = [];
+		if (inProgress.length) parts.push(`●${inProgress.length}`);
+		if (blocked.length) parts.push(`⊘${blocked.length}`);
+		if (pending.length) parts.push(`○${pending.length}`);
+		if (review.length) parts.push(`◎${review.length}`);
+		if (completed.length) parts.push(`✓${completed.length}`);
+		ctx.ui.setStatus("tasks", `📋 ${parts.join(" ")}`);
+
+		// Widget above editor — active tasks detail
+		if (active === 0) {
+			ctx.ui.setWidget("tasks", undefined);
+			return;
+		}
+
+		const lines: string[] = [];
+
+		// In-progress tasks (max 2)
+		for (const t of inProgress.slice(0, 2)) {
+			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
+			let line = `● ${pri} ${t.subject}`;
+			if (t.activeForm) line += `  (${t.activeForm})`;
+			lines.push(line);
+		}
+
+		// Blocked tasks (max 1)
+		if (blocked.length) {
+			const t = blocked[0];
+			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
+			lines.push(`⊘ ${pri} ${t.subject}`);
+		}
+
+		// Pending count if any
+		if (pending.length && !inProgress.length) {
+			const t = pending.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])[0];
+			const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
+			lines.push(`○ ${pri} ${t.subject}`);
+		}
+
+		if (lines.length > 0) {
+			// Render using component factory for theme support
+			ctx.ui.setWidget("tasks", (tui: any, theme: Theme) => {
+				const rendered: Text[] = [];
+				for (let i = 0; i < lines.length; i++) {
+					const line = lines[i];
+					let text: string;
+					if (line.startsWith("●")) {
+						text = theme.fg("accent", line);
+					} else if (line.startsWith("⊘")) {
+						text = theme.fg("warning", line);
+					} else {
+						text = theme.fg("muted", line);
+					}
+					rendered.push(new Text(text, 0, i));
+				}
+				return rendered;
+			});
+		} else {
+			ctx.ui.setWidget("tasks", undefined);
+		}
+	}
+
+	// Refresh widget on task tool results
+	const TASK_TOOLS = new Set([
+		"TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+		"TaskSearch", "TaskNext", "TaskDecompose", "TaskArchive",
+	]);
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (TASK_TOOLS.has(event.toolName)) {
+			refreshWidget(ctx);
+		}
+	});
+
+	// Refresh on session start
+	pi.on("session_start", async (_event, ctx) => {
+		refreshWidget(ctx);
+	});
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  TOOLS
 	// ═══════════════════════════════════════════════════════════════════
