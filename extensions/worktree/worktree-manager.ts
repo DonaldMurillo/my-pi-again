@@ -6,7 +6,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { RpcClient } from "./rpc-client.js";
@@ -116,9 +116,10 @@ export function createWorktree(
 	// Check if branch exists
 	const branchExists = gitOrNull(`git rev-parse --verify ${branch} 2>/dev/null`, cwd) !== null;
 
-	// Create worktree — default parent dir is sibling of repo root
-	const parentDir = join(repoRoot, "..");
-	const wtPath = join(parentDir, `${basename(repoRoot)}-${branch}`);
+	// Create worktree — inside .pi/worktrees/ to stay within project
+	const wtDir = join(repoRoot, ".pi", "worktrees");
+	if (!existsSync(wtDir)) mkdirSync(wtDir, { recursive: true });
+	const wtPath = join(wtDir, branch);
 
 	if (existsSync(wtPath)) {
 		throw new Error(`Path already exists: ${wtPath}`);
@@ -159,6 +160,14 @@ export function removeWorktree(cwd: string, branch: string): void {
 		try { rmSync(entry.path, { recursive: true, force: true }); } catch { /* ignore */ }
 		git("git worktree prune", cwd);
 	}
+
+	// Remove empty worktrees dir if no more worktrees
+	const wtDir = join(repoRoot, ".pi", "worktrees");
+	try {
+		if (existsSync(wtDir) && readdirSync(wtDir).length === 0) {
+			rmSync(wtDir, { recursive: true });
+		}
+	} catch { /* ignore */ }
 
 	// Remove from metadata
 	meta.worktrees = meta.worktrees.filter((w) => w.branch !== branch);
