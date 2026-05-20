@@ -463,6 +463,22 @@ If the user gives you work with more than one step and you are NOT calling TodoW
 you are violating a core behavioral rule. Create the plan FIRST, then do the work.
 </CRITICAL>
 
+<RULE name="choose_the_right_tool">
+Use TodoWrite when:
+- The work is short-lived and will finish this session (plan → execute → done)
+- You need a quick scratch list for the current request
+- Steps are simple (no priorities, dependencies, acceptance criteria)
+
+Use TaskCreate when:
+- The work spans sessions or the user may come back to it later
+- The work has priorities, labels, dependencies, acceptance criteria
+- The user explicitly asks to "create a task" or "track this"
+- The work may be delegated to a worktree agent
+- The work is part of a project backlog
+
+Both can be used in the same conversation. TodoWrite for immediate plan, TaskCreate for persistent tracking.
+</RULE>
+
 <RULE name="create_full_plan_upfront">
 When you call TodoWrite or TaskCreate, you MUST create ALL steps upfront in a single call.
 Do NOT create step 1, complete it, then create steps 2 and 3. The user must see the full plan
@@ -526,30 +542,16 @@ TodoWrite({ todos: [
 ] })
 </EXAMPLE>
 
-<EXAMPLE trigger="user says 'research a joke, tell it, then deliver the punchline'">
-TodoWrite({ todos: [
-  { content: "Research: find a joke online", status: "in_progress", activeForm: "Researching joke" },
-  { content: "Tell the joke setup", status: "pending" },
-  { content: "Deliver the punchline", status: "pending" }
+<EXAMPLE trigger="user says 'implement auth — login, signup, OAuth — track it'">
+// User said "track it" — use TaskCreate for persistent tracking
+TaskCreate({ subject: "Auth system", priority: "high", labels: ["auth"] })
+// Then decompose into subtasks:
+TaskDecompose({ taskId, subtasks: [
+  { subject: "Login endpoint" },
+  { subject: "Signup endpoint" },
+  { subject: "OAuth integration" }
 ] })
-// ... actually look up a joke via bash curl ...
-TodoWrite({ todos: [
-  { content: "Research: find a joke online", status: "completed" },
-  { content: "Tell the joke setup", status: "in_progress" },
-  { content: "Deliver the punchline", status: "pending" }
-] })
-// ... output ONLY the joke setup ...
-TodoWrite({ todos: [
-  { content: "Research: find a joke online", status: "completed" },
-  { content: "Tell the joke setup", status: "completed" },
-  { content: "Deliver the punchline", status: "in_progress" }
-] })
-// ... output ONLY the punchline ...
-TodoWrite({ todos: [
-  { content: "Research: find a joke online", status: "completed" },
-  { content: "Tell the joke setup", status: "completed" },
-  { content: "Deliver the punchline", status: "completed" }
-] })
+// Work through each subtask, updating status as you go
 </EXAMPLE>
 
 <tools>
@@ -565,23 +567,6 @@ TaskArchive({ status }) — archive completed
 </tools>
 </task_management>
 `;
-	});
-
-	pi.on("session_start", async (_event, ctx) => {
-		const store = loadStore(ctx.cwd);
-		const inProgress = Object.values(store.tasks).filter(
-			(t) => t.status === "in_progress",
-		);
-
-		if (inProgress.length > 0) {
-			const list = inProgress
-				.map((t) => `  - [${t.id.slice(0, 8)}] ${t.subject}`)
-				.join("\n");
-			ctx.ui.notify(
-				`Resuming ${inProgress.length} in-progress task(s):\n${list}`,
-				"info",
-			);
-		}
 	});
 
 	// ── Per-turn nudge: remind agent to use task tools ──
