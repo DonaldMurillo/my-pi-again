@@ -134,12 +134,12 @@ yourself — just use the path directly.
 
 	// ── Track active worktree for status bar ───────────────────────────────
 
-	let activeWorktree: string | null = null;
+	let activeWorktree: { branch: string; path: string } | null = null;
 
 	function updateWorktreeStatus(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
 		if (activeWorktree) {
-			ctx.ui.setStatus("worktree", `🌳 ${activeWorktree}`);
+			ctx.ui.setStatus("worktree", `🌳 ${activeWorktree.branch}  ${activeWorktree.path}`);
 		} else {
 			ctx.ui.setStatus("worktree", undefined);
 		}
@@ -195,7 +195,7 @@ yourself — just use the path directly.
 		if (!purpose) return errorResult("purpose is required (so we can track and clean up)");
 
 		const result = createWorktree(ctx.cwd, branch, purpose);
-		activeWorktree = branch;
+		activeWorktree = { branch, path: result.path };
 		updateWorktreeStatus(ctx);
 		return textResult(
 			`Created worktree for "${result.branch}" at ${result.path}\n` +
@@ -320,7 +320,7 @@ yourself — just use the path directly.
 
 		// Remove worktree
 		removeWorktree(ctx.cwd, branch);
-		if (activeWorktree === branch) {
+		if (activeWorktree?.branch === branch) {
 			activeWorktree = null;
 			updateWorktreeStatus(ctx);
 		}
