@@ -6,9 +6,6 @@
  *   - /worktree command — user can inspect and manage worktrees
  *   - RPC agent pool — persistent pi subprocess per worktree for autonomous work
  *   - Main session coordinates all active worktree agents
- *
- * Safety: Creating worktrees and spawning agents require user confirmation
- * since they consume disk space and API tokens.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -47,6 +44,12 @@ Usage:
 - \`worktree({ action: "cleanup", branch: "feat/auth" })\` — remove worktree and kill agent
 
 Each worktree gets an isolated agent that works independently. Use this to parallelize work.
+
+**Important:** When the user asks to "work in" or "move to" a worktree, after creating it,
+use the returned path as the working directory for all subsequent file operations (read, write, edit, bash).
+The worktree path is a full absolute path — pass it to bash commands as \`cd <path> && ...\` or use it
+as the \`path\` argument in read/write/edit tools. You do NOT need to spawn an agent to work in a worktree
+yourself — just use the path directly.
 `;
 	});
 
@@ -129,6 +132,19 @@ Each worktree gets an isolated agent that works independently. Use this to paral
 		},
 	});
 
+	// ── Track active worktree for status bar ───────────────────────────────
+
+	let activeWorktree: string | null = null;
+
+	function updateWorktreeStatus(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
+		if (activeWorktree) {
+			ctx.ui.setStatus("worktree", `🌳 ${activeWorktree}`);
+		} else {
+			ctx.ui.setStatus("worktree", undefined);
+		}
+	}
+
 	// ── Cleanup on shutdown ────────────────────────────────────────────
 
 	pi.on("session_shutdown", async () => {
@@ -178,20 +194,13 @@ Each worktree gets an isolated agent that works independently. Use this to paral
 		if (!branch) return errorResult("branch is required");
 		if (!purpose) return errorResult("purpose is required (so we can track and clean up)");
 
-		// Ask permission — worktrees cost disk space
-		if (ctx.hasUI) {
-			const confirmed = await ctx.ui.confirm(
-				"Create worktree?",
-				`Create git worktree for branch "${branch}"?\nPurpose: ${purpose}`,
-			);
-			if (!confirmed) return textResult("User declined worktree creation.");
-		}
-
 		const result = createWorktree(ctx.cwd, branch, purpose);
+		activeWorktree = branch;
+		updateWorktreeStatus(ctx);
 		return textResult(
 			`Created worktree for "${result.branch}" at ${result.path}\n` +
 			`Branch was ${result.created ? "created" : "already existed"}.\n` +
-			`Use action "spawn" to start an agent, or "send" to send tasks.`,
+			`Path: ${result.path}`,
 		);
 	}
 
@@ -202,15 +211,6 @@ Each worktree gets an isolated agent that works independently. Use this to paral
 	) {
 		const branch = params.branch?.trim();
 		if (!branch) return errorResult("branch is required");
-
-		// Ask permission — agents cost API tokens
-		if (ctx.hasUI) {
-			const confirmed = await ctx.ui.confirm(
-				"Spawn worktree agent?",
-				`Start a headless pi agent in worktree "${branch}"?\nThis will consume API tokens for all work the agent does.`,
-			);
-			if (!confirmed) return textResult("User declined agent spawn.");
-		}
 
 		onUpdate({
 			content: [{ type: "text", text: `Spawning agent in worktree "${branch}"...` }],
@@ -244,13 +244,7 @@ Each worktree gets an isolated agent that works independently. Use this to paral
 			const wt = worktrees.find((w) => w.branch === branch);
 			if (!wt) return errorResult(`No worktree for branch "${branch}". Use "create" first.`);
 
-			if (ctx.hasUI) {
-				const confirmed = await ctx.ui.confirm(
-					"Auto-spawn agent?",
-					`No agent running for "${branch}". Spawn one?`,
-				);
-				if (!confirmed) return textResult("User declined auto-spawn.");
-			}
+
 
 			onUpdate({
 				content: [{ type: "text", text: `Spawning agent for "${branch}"...` }],
@@ -320,19 +314,16 @@ Each worktree gets an isolated agent that works independently. Use this to paral
 		const branch = params.branch?.trim();
 		if (!branch) return errorResult("branch is required");
 
-		if (ctx.hasUI) {
-			const confirmed = await ctx.ui.confirm(
-				"Remove worktree?",
-				`Remove worktree "${branch}" and kill its agent? Uncommitted changes may be lost.`,
-			);
-			if (!confirmed) return textResult("User declined cleanup.");
-		}
 
-		// Kill agent first
+
 		killAgent(branch);
 
 		// Remove worktree
 		removeWorktree(ctx.cwd, branch);
+		if (activeWorktree === branch) {
+			activeWorktree = null;
+			updateWorktreeStatus(ctx);
+		}
 		return textResult(`Removed worktree "${branch}" and cleaned up.`);
 	}
 }
