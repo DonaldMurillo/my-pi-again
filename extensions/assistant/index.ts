@@ -56,6 +56,38 @@ function tryParseJSON(str: string): any {
 	try { return JSON.parse(str); } catch { return null; }
 }
 
+/** Detect actual working directory from tool call paths.
+ *  When agent works in a worktree, ctx.cwd is still the original project.
+ *  We infer the real cwd from the paths used in write/edit/bash tool calls. */
+function detectEffectiveCwd(agentMessages: any[], fallbackCwd: string): string {
+	let longestPrefix = "";
+	for (const msg of agentMessages) {
+		if (msg.role === "assistant" && Array.isArray(msg.content)) {
+			for (const c of msg.content) {
+				if (c.type === "tool_use" && (c.name === "write" || c.name === "edit" || c.name === "bash") && c.input) {
+					const p = c.input.path as string | undefined;
+					if (p && p.startsWith("/")) {
+						// Check if this path shares a common prefix with existing paths
+						if (p.length > longestPrefix.length) {
+							// Simple heuristic: extract directory part
+							const lastSlash = p.lastIndexOf("/");
+							if (lastSlash > 0) {
+								const dir = p.slice(0, lastSlash);
+								if (dir.length > longestPrefix.length) longestPrefix = dir;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	// If we found paths outside fallbackCwd, use the deepest common ancestor
+	if (longestPrefix && !longestPrefix.startsWith(fallbackCwd)) {
+		return longestPrefix;
+	}
+	return fallbackCwd;
+}
+
 function extractFileSnapshot(agentMessages: any[], cwd: string): string {
 	const filePaths = new Set<string>();
 
@@ -359,10 +391,12 @@ export default function (pi: ExtensionAPI) {
 		// --- "Are We There Yet?" ---
 		if (profile.id === "are-we-there-yet") {
 			const fullConversation = state.sessionHistory
+				.filter((h) => !h.text.includes("Are We There Yet evaluation found"))
 				.map((h) => `${h.role}: ${h.text}`)
 				.join("\n\n");
 
-			const fileSnapshot = extractFileSnapshot(agentMessages, ctx.cwd);
+			const effectiveCwd = detectEffectiveCwd(agentMessages, ctx.cwd);
+			const fileSnapshot = extractFileSnapshot(agentMessages, effectiveCwd);
 
 			// --- Feature: detect no change since last eval ---
 			const snapshotHash = hashString(fileSnapshot);
