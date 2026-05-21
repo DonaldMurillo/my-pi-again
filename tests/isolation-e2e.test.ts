@@ -37,8 +37,10 @@ class RpcClient {
 	private pending: Array<{ resolve: (line: JsonLine) => void; predicate: (line: JsonLine) => boolean }> = [];
 	private lines: JsonLine[] = [];
 
-	constructor(cwd: string) {
-		this.proc = spawn("pi", ["--mode", "rpc", "--no-session"], {
+	constructor(cwd: string, model?: string) {
+		const args = ["--mode", "rpc", "--no-session"];
+		if (model) args.push("--model", model);
+		this.proc = spawn("pi", args, {
 			cwd, stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.proc.stdout!.on("data", (chunk: Buffer) => {
@@ -103,13 +105,19 @@ class RpcClient {
 	kill() { this.proc.kill(); }
 }
 
-// --- Helpers ---
+// ═══════════════════════════════════════════════════════════════════════
 
+const MODELS = [
+	{ name: "zai/glm-5.1", label: "glm-5.1" },
+	{ name: "github-copilot/claude-haiku-4.5", label: "haiku-4.5" },
+];
+
+// Reset counter per model to avoid collisions
 let testCounter = 0;
 
-function freshDir(): string {
+function freshDir(modelLabel: string): string {
 	testCounter++;
-	const dir = join(process.cwd(), ".tmp", `isolation-test-${testCounter}`);
+	const dir = join(process.cwd(), ".tmp", `isolation-${modelLabel}-${testCounter}`);
 	rmSync(dir, { recursive: true, force: true });
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "package.json"), '{"name":"isolation-test"}');
@@ -120,13 +128,13 @@ async function stagger() {
 	await new Promise((r) => setTimeout(r, STAGGER_MS));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+for (const { name: modelName, label: modelLabel } of MODELS) {
 
-describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
+describe(`Isolation E2E (${modelLabel})`, { timeout: 120_000, sequential: true }, () => {
 
 	it("should ALLOW writing a file inside the project directory", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -137,7 +145,6 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 			expect(writeResult).toBeDefined();
 			expect(writeResult.isError).toBeFalsy();
 
-			// Verify file exists on disk
 			expect(existsSync(join(dir, "test.txt"))).toBe(true);
 			expect(readFileSync(join(dir, "test.txt"), "utf8")).toContain("hello world");
 		} finally {
@@ -148,19 +155,17 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should BLOCK writing a file outside the project directory", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
 				"Write 'escaped' to /tmp/isolation-escape-test.txt",
 			);
 
-			// The write tool should have been blocked by isolation
 			const blocked = client.findBlocked(events, "Isolation");
 			expect(blocked).toBeDefined();
 
-			// File should NOT exist
 			expect(existsSync("/tmp/isolation-escape-test.txt")).toBe(false);
 		} finally {
 			client.kill();
@@ -170,10 +175,9 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should ALLOW reading a file outside the project directory", async () => {
-		const dir = freshDir();
-		// Create a file outside the project to read
+		const dir = freshDir(modelLabel);
 		writeFileSync("/tmp/isolation-read-test.txt", "readable content");
-		const client = new RpcClient(dir);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -192,8 +196,8 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should BLOCK bash commands that write outside the project", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -212,8 +216,8 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should ALLOW bash commands that only read inside the project", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -231,8 +235,8 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should ALLOW git commands inside the project", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -250,8 +254,8 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 	});
 
 	it("should BLOCK recursive delete of .git", async () => {
-		const dir = freshDir();
-		const client = new RpcClient(dir);
+		const dir = freshDir(modelLabel);
+		const client = new RpcClient(dir, modelName);
 
 		try {
 			const events = await client.prompt(
@@ -266,4 +270,7 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 
 		await stagger();
 	});
-});
+
+}); // end describe per model
+
+} // end for loop
