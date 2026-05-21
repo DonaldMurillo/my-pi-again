@@ -1,0 +1,24 @@
+{
+	"tiers": {
+		"fast": {
+			"provider": "zai",
+			"model": "glm-4.5-air",
+			"description": "Fast & cheap — simple tasks, formatting, boilerplate"
+		},
+		"balanced": {
+			"provider": "zai",
+			"model": "glm-5-turbo",
+			"description": "Balanced — most coding tasks"
+		},
+		"deep": {
+			"provider": "zai",
+			"model": "glm-5.1",
+			"description": "Deep — architecture, reviews, complex bugs"
+		}
+	},
+	"defaults": {
+		"defaultTier": "balanced",
+		"maxConcurrency": 5,
+		"timeoutSeconds": 300
+	}
+}

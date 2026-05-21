@@ -45,8 +45,8 @@ async function syncExtensions() {
 		const src = join(extensionsSrc, dir.name);
 		const dest = join(extensionsDest, dir.name);
 
-		// Must have index.ts
-		if (!existsSync(join(src, "index.ts"))) {
+	// Must have index.ts — except shared/ which is a library
+		if (dir.name !== "shared" && !existsSync(join(src, "index.ts"))) {
 			console.log(`  ⏭  ${dir.name} (no index.ts, skipping)`);
 			continue;
 		}

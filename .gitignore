@@ -8,3 +8,8 @@ node_modules/
 .pi/messages/
 
 .pi/tasks/
+
+# Subagent results and sessions
+.pi/agents/results/
+.pi/subagent-sessions/
+.tmp/

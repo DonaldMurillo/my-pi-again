@@ -9,7 +9,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
-import { RpcClient } from "./rpc-client.js";
+import { RpcClient } from "../shared/rpc-client.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
 

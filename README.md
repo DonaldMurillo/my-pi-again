@@ -10,6 +10,7 @@ Pi extensions framework. Source of truth — sync to `~/.pi/agent/extensions/` f
 
 | Extension | Description |
 |-----------|-------------|
+| `diff-viewer` | Shows git diff and unified diffs in inline format to save screen space |
 | `meta-skills` | Bridges skills from Claude, Cursor, Copilot, and other ecosystems into pi |
 | `isolation` | Restricts agent filesystem writes to project directory |
 

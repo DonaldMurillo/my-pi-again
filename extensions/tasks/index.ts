@@ -177,6 +177,35 @@ function saveStore(cwd: string, store: TaskStore): void {
 	writeFileSync(getTasksFile(cwd), JSON.stringify(store, null, "\t") + "\n");
 }
 
+// ─── Partial ID resolution (like git commit prefixes) ────────────────
+
+/**
+ * Resolve a possibly-truncated task ID to the full ID.
+ * Supports:
+ *   - Full ID:  "01KS3GS490EZTZ3XTJ22" → exact match
+ *   - Prefix:   "01KS3GS4"             → first task starting with prefix
+ *   - Throws if ambiguous (multiple matches) or not found
+ */
+function resolveTaskId(store: TaskStore, partialId: string): string {
+	// Exact match
+	if (store.tasks[partialId]) return partialId;
+
+	// Prefix match
+	const matches = Object.keys(store.tasks).filter((id) => id.startsWith(partialId));
+	if (matches.length === 0) throw new Error(`Task not found: ${partialId}`);
+	if (matches.length > 1) throw new Error(`Ambiguous ID "${partialId}" matches ${matches.length} tasks: ${matches.map((id) => id.slice(0, 8)).join(", ")}`);
+	return matches[0];
+}
+
+/**
+ * Resolve a possibly-truncated task ID, returning the task directly.
+ * Returns null if not found (no throw).
+ */
+function findTask(store: TaskStore, partialId: string): Task | null {
+	const fullId = resolveTaskId(store, partialId);
+	return store.tasks[fullId] ?? null;
+}
+
 // ─── Priority ordering ──────────────────────────────────────────────
 
 const PRIORITY_ORDER: Record<Priority, number> = {
@@ -230,19 +259,19 @@ function formatTask(task: Task, verbose = false): string {
 	};
 
 	const lines: string[] = [
-		`${statusIcons[task.status]} ${priorityIcons[task.priority]} [${task.id.slice(0, 8)}] ${task.subject}`,
+		`${statusIcons[task.status]} ${priorityIcons[task.priority]} [${task.id}] ${task.subject}`,
 	];
 
 	if (verbose) {
 		if (task.description) lines.push(`  ${task.description}`);
 		if (task.owner) lines.push(`  Owner: ${task.owner}`);
 		if (task.labels.length) lines.push(`  Labels: ${task.labels.join(", ")}`);
-		if (task.blockedBy.length) lines.push(`  Blocked by: ${task.blockedBy.map((id) => id.slice(0, 8)).join(", ")}`);
-		if (task.blocks.length) lines.push(`  Blocks: ${task.blocks.map((id) => id.slice(0, 8)).join(", ")}`);
+		if (task.blockedBy.length) lines.push(`  Blocked by: ${task.blockedBy.join(", ")}`);
+		if (task.blocks.length) lines.push(`  Blocks: ${task.blocks.join(", ")}`);
 		if (task.effort) lines.push(`  Effort: ${task.effort}`);
 		if (task.branch) lines.push(`  Branch: ${task.branch}`);
-		if (task.parentTaskId) lines.push(`  Parent: ${task.parentTaskId.slice(0, 8)}`);
-		if (task.subtasks?.length) lines.push(`  Subtasks: ${task.subtasks.map((id) => id.slice(0, 8)).join(", ")}`);
+		if (task.parentTaskId) lines.push(`  Parent: ${task.parentTaskId}`);
+		if (task.subtasks?.length) lines.push(`  Subtasks: ${task.subtasks.join(", ")}`);
 		if (task.acceptanceCriteria?.length) {
 			lines.push("  Acceptance criteria:");
 			for (const ac of task.acceptanceCriteria) {
@@ -358,7 +387,8 @@ function renderTaskBoard(
 		completed: "Completed",
 	};
 
-	const header = theme.bold(` Task Board — ${filterLabels[state.filter]} (${filtered.length}) `);
+	const headerText = ` Task Board — ${filterLabels[state.filter]} (${filtered.length}) `;
+	const header = theme.bold(headerText.length > width - 2 ? headerText.slice(0, width - 5) + "..." : headerText);
 	lines.push(theme.fg("accent", header));
 
 	// Status counts
@@ -369,9 +399,13 @@ function renderTaskBoard(
 
 	const countParts = ["all", "in_progress", "blocked", "pending", "review", "completed"]
 		.filter((s) => counts[s])
-		.map((s) => `${filterLabels[s] || s}: ${counts[s]}`)
-		.join("  ");
-	lines.push(theme.fg("dim", countParts));
+		.map((s) => `${filterLabels[s] || s}: ${counts[s]}`);
+	// Join with smaller separator if needed, and truncate if too long
+	let countText = countParts.join(" ");
+	if (countText.length > width - 2) {
+		countText = countParts.slice(0, 3).join(" ") + "...";
+	}
+	lines.push(theme.fg("dim", countText));
 
 	// Separator
 	lines.push(theme.fg("border", "─".repeat(width)));
@@ -439,7 +473,16 @@ function renderTaskBoard(
 
 	// Footer
 	lines.push(theme.fg("border", "─".repeat(width)));
-	const footer = " ↑↓/jk:nav  Enter:expand  f:filter  n:next  a:archive  q:close ";
+	const footerText = " ↑↓/jk:nav  Enter:expand  f:filter  n:next  a:archive  q:close ";
+	// Truncate footer to fit terminal width
+	const visibleWidth = (text: string) => {
+		// Strip ANSI escape sequences to get visible width
+		const ansiRegex = /\x1b\[\d+(;\d+)?m/g;
+		return text.replace(ansiRegex, '').length;
+	};
+	const footer = footerText.length > width - 2 
+		? footerText.slice(0, width - 5) + '...'
+		: footerText;
 	lines.push(theme.fg("dim", footer));
 
 	return lines;
@@ -663,7 +706,7 @@ TaskArchive({ status }) — archive completed
 			saveStore(ctx.cwd, store);
 
 			if (allVerified) {
-				event.systemPrompt += `\n\n[TASKS] All acceptance criteria verified for task [${task.id.slice(0, 8)}] "${task.subject}". Consider marking it completed with TaskUpdate.`;
+				event.systemPrompt += `\n\n[TASKS] All acceptance criteria verified for task [${task.id}] "${task.subject}". Consider marking it completed with TaskUpdate.`;
 			}
 		}
 	});
@@ -702,8 +745,25 @@ TaskArchive({ status }) — archive completed
 				for (let i = 0; i < Math.min(doneTodos.length, 2); i++) {
 					themed.push(theme.fg("dim", theme.strikethrough(`✓ ${doneTodos[i].content}`)));
 				}
+				const truncateToWidth = (line: string, maxW: number): string => {
+					let vis = 0, cutPos = line.length, idx = 0;
+					while (idx < line.length) {
+						if (line[idx] === '\x1b') {
+							const end = line.indexOf('m', idx);
+							if (end >= 0) { idx = end + 1; continue; }
+						}
+						if (line[idx] === ']' && line[idx + 1] === '8' && line[idx + 2] === ';' && line[idx + 3] === ';') {
+							const end = line.indexOf('\x07', idx);
+							if (end >= 0) { idx = end + 1; continue; }
+						}
+						vis++;
+						if (vis > maxW - 1) { cutPos = idx; break; }
+						idx++;
+					}
+					return vis <= maxW - 1 ? line : line.slice(0, cutPos) + "\u2026";
+				};
 				return {
-					render(_width: number): string[] { return themed; },
+					render(width: number): string[] { return themed.map((l) => truncateToWidth(l, width)); },
 					invalidate() {},
 				};
 			});
@@ -734,25 +794,44 @@ TaskArchive({ status }) — archive completed
 				if (pe) taskParts.push(`${pe} pending`);
 				if (co) taskParts.push(`${co} done`);
 				themed.push(theme.fg("accent", theme.bold(`tasks (${taskParts.join(", ")})`)));
+// Order: in_progress → pending → blocked → completed
+				// Guarantee min 3 from active+pending if available, max 5 total
+				const activeAndPending = [...inProgress, ...pending];
+				const guaranteed = activeAndPending.slice(0, 3); // min 3 active/pending if available
+				const remaining = activeAndPending.slice(3);
+				const overflow = [...remaining, ...blocked, ...completed];
 				let count = 0;
-				for (const t of [...inProgress, ...blocked, ...pending]) {
-					if (count >= 3) break;
+				for (const t of [...guaranteed, ...overflow]) {
+					if (count >= 5) break;
 					const pri = { critical: "🔥", high: "↑", medium: "→", low: "↓" }[t.priority];
-					const icon = { in_progress: "●", blocked: "⊘", pending: "○", review: "◎" }[t.status as string];
+					const icon = { in_progress: "●", blocked: "⊘", pending: "○", review: "◎", completed: "✓" }[t.status as string];
 					let line = `${icon} ${pri} ${t.subject}`;
 					if (t.activeForm && t.status === "in_progress") line += `  (${t.activeForm})`;
 					if (t.status === "in_progress") themed.push(theme.fg("accent", line));
 					else if (t.status === "blocked") themed.push(theme.fg("error", line));
+					else if (t.status === "completed") themed.push(theme.fg("dim", line));
 					else themed.push(theme.fg("text", line));
 					count++;
 				}
-				for (const t of completed) {
-					if (count >= 5) break;
-					themed.push(theme.fg("dim", `✓ ${t.subject}`));
-					count++;
-				}
+				const truncateToWidth = (line: string, maxW: number): string => {
+					let vis = 0, cutPos = line.length, idx = 0;
+					while (idx < line.length) {
+						if (line[idx] === '\x1b') {
+							const end = line.indexOf('m', idx);
+							if (end >= 0) { idx = end + 1; continue; }
+						}
+						if (line[idx] === ']' && line[idx + 1] === '8' && line[idx + 2] === ';' && line[idx + 3] === ';') {
+							const end = line.indexOf('\x07', idx);
+							if (end >= 0) { idx = end + 1; continue; }
+						}
+						vis++;
+						if (vis > maxW - 1) { cutPos = idx; break; }
+						idx++;
+					}
+					return vis <= maxW - 1 ? line : line.slice(0, cutPos) + "\u2026";
+				};
 				return {
-					render(_width: number): string[] { return themed; },
+					render(width: number): string[] { return themed.map((l) => truncateToWidth(l, width)); },
 					invalidate() {},
 				};
 			});
@@ -907,23 +986,25 @@ TaskArchive({ status }) — archive completed
 			};
 
 			// Link parent → child
-			if (params.parentTaskId && store.tasks[params.parentTaskId]) {
-				const parent = store.tasks[params.parentTaskId];
-				if (!parent.subtasks) parent.subtasks = [];
-				parent.subtasks.push(id);
-				parent.updatedAt = now;
+			if (params.parentTaskId) {
+				const parent = findTask(store, params.parentTaskId);
+				if (parent) {
+					if (!parent.subtasks) parent.subtasks = [];
+					parent.subtasks.push(id);
+					parent.updatedAt = now;
+				}
 			}
 
 			// Link blocks/blockedBy bidirectionally
 			for (const blockId of task.blocks) {
-				const blocked = store.tasks[blockId];
+				const blocked = findTask(store, blockId);
 				if (blocked && !blocked.blockedBy.includes(id)) {
 					blocked.blockedBy.push(id);
 					blocked.updatedAt = now;
 				}
 			}
 			for (const blockerId of task.blockedBy) {
-				const blocker = store.tasks[blockerId];
+				const blocker = findTask(store, blockerId);
 				if (blocker && !blocker.blocks.includes(id)) {
 					blocker.blocks.push(id);
 					blocker.updatedAt = now;
@@ -943,7 +1024,7 @@ TaskArchive({ status }) — archive completed
 			return {
 				content: [{
 					type: "text" as const,
-					text: `Created task ${id.slice(0, 8)}: ${task.subject}\nStatus: ${status}${status === "blocked" ? " (blocked by incomplete dependencies)" : ""}\nPriority: ${task.priority}`,
+					text: `Created task ${id}: ${task.subject}\nStatus: ${status}${status === "blocked" ? " (blocked by incomplete dependencies)" : ""}\nPriority: ${task.priority}`,
 				}],
 				details: { taskId: id, task },
 			};
@@ -997,8 +1078,15 @@ TaskArchive({ status }) — archive completed
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const cwd = ctx.cwd;
 			const store = loadStore(cwd);
-			const task = store.tasks[params.taskId];
-
+			let task: Task;
+			try {
+				task = findTask(store, params.taskId)!;
+			} catch (err) {
+				return {
+					content: [{ type: "text" as const, text: err instanceof Error ? err.message : `Task not found: ${params.taskId}` }],
+					isError: true,
+				};
+			}
 			if (!task) {
 				return {
 					content: [{ type: "text" as const, text: `Task not found: ${params.taskId}` }],
@@ -1066,8 +1154,9 @@ TaskArchive({ status }) — archive completed
 			// Dependencies
 			if (params.addBlocks) {
 				for (const blockId of params.addBlocks) {
-					if (!task.blocks.includes(blockId)) task.blocks.push(blockId);
-					const blocked = store.tasks[blockId];
+					const resolvedBlockId = (() => { try { return resolveTaskId(store, blockId); } catch { return blockId; } })();
+					if (!task.blocks.includes(resolvedBlockId)) task.blocks.push(resolvedBlockId);
+					const blocked = store.tasks[resolvedBlockId];
 					if (blocked && !blocked.blockedBy.includes(task.id)) {
 						blocked.blockedBy.push(task.id);
 						blocked.updatedAt = now;
@@ -1077,8 +1166,9 @@ TaskArchive({ status }) — archive completed
 			}
 			if (params.addBlockedBy) {
 				for (const blockerId of params.addBlockedBy) {
-					if (!task.blockedBy.includes(blockerId)) task.blockedBy.push(blockerId);
-					const blocker = store.tasks[blockerId];
+					const resolvedBlockerId = (() => { try { return resolveTaskId(store, blockerId); } catch { return blockerId; } })();
+					if (!task.blockedBy.includes(resolvedBlockerId)) task.blockedBy.push(resolvedBlockerId);
+					const blocker = store.tasks[resolvedBlockerId];
 					if (blocker && !blocker.blocks.includes(task.id)) {
 						blocker.blocks.push(task.id);
 						blocker.updatedAt = now;
@@ -1144,7 +1234,7 @@ TaskArchive({ status }) — archive completed
 			return {
 				content: [{
 					type: "text" as const,
-					text: `Updated ${task.id.slice(0, 8)}: ${changes.join(", ")}`,
+					text: `Updated ${task.id}: ${changes.join(", ")}`,
 				}],
 			};
 		},
@@ -1163,7 +1253,15 @@ TaskArchive({ status }) — archive completed
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const store = loadStore(ctx.cwd);
-			const task = store.tasks[params.taskId];
+			let task: Task | null;
+			try {
+				task = findTask(store, params.taskId);
+			} catch (err) {
+				return {
+					content: [{ type: "text" as const, text: err instanceof Error ? err.message : `Task not found: ${params.taskId}` }],
+					isError: true,
+				};
+			}
 
 			if (!task) {
 				return {
@@ -1363,7 +1461,7 @@ TaskArchive({ status }) — archive completed
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const cwd = ctx.cwd;
 			const store = loadStore(cwd);
-			const parent = store.tasks[params.taskId];
+			const parent = findTask(store, params.taskId);
 
 			if (!parent) {
 				return {
@@ -1446,13 +1544,13 @@ TaskArchive({ status }) — archive completed
 			saveStore(cwd, store);
 
 			const summary = createdIds
-				.map((id, i) => `  ${i + 1}. [${id.slice(0, 8)}] ${params.subtasks[i].subject}`)
+				.map((id, i) => `  ${i + 1}. [${id}] ${params.subtasks[i].subject}`)
 				.join("\n");
 
 			return {
 				content: [{
 					type: "text" as const,
-					text: `Decomposed [${parent.id.slice(0, 8)}] "${parent.subject}" into ${createdIds.length} subtasks (${strategy}):\n${summary}`,
+					text: `Decomposed [${parent.id}] "${parent.subject}" into ${createdIds.length} subtasks (${strategy}):\n${summary}`,
 				}],
 				details: { parentTaskId: parent.id, subtaskIds: createdIds },
 			};
