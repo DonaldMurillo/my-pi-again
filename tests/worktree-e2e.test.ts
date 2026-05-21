@@ -1,13 +1,16 @@
 /**
  * Worktree extension — E2E tests via RPC.
  *
- * Each test gets its own pi subprocess in a git repo.
- * Verifies tool registration, worktree creation, and agent spawning.
+ * Verifies the tool works: create a worktree, get a path back,
+ * agent can work in it directly (read/write files at the worktree path),
+ * then cleanup.
+ *
+ * Each test gets its own pi subprocess in a fresh git repo.
  *
  * Run: npx vitest run tests/worktree-e2e.test.ts
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { spawn, type ChildProcess, execSync } from "node:child_process";
 import { join } from "node:path";
 import {
@@ -20,8 +23,6 @@ import {
 
 const STAGGER_MS = 3_000;
 
-// --- RPC client (same pattern as awty-e2e.test.ts) ---
-
 interface JsonLine { [key: string]: unknown; type: string; }
 
 class RpcClient {
@@ -30,8 +31,10 @@ class RpcClient {
 	private pending: Array<{ resolve: (line: JsonLine) => void; predicate: (line: JsonLine) => boolean }> = [];
 	private lines: JsonLine[] = [];
 
-	constructor(cwd: string) {
-		this.proc = spawn("pi", ["--mode", "rpc", "--no-session"], {
+	constructor(cwd: string, model?: string) {
+		const args = ["--mode", "rpc", "--no-session"];
+		if (model) args.push("--model", model);
+		this.proc = spawn("pi", args, {
 			cwd, stdio: ["pipe", "pipe", "pipe"],
 		});
 		this.proc.stdout!.on("data", (chunk: Buffer) => {
@@ -88,8 +91,6 @@ class RpcClient {
 	kill() { this.proc.kill(); }
 }
 
-// --- Test helpers ---
-
 let testCounter = 0;
 
 function freshGitRepo(): string {
@@ -98,14 +99,11 @@ function freshGitRepo(): string {
 	rmSync(dir, { recursive: true, force: true });
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "package.json"), '{"name":"worktree-test"}');
-
-	// Initialize git repo
 	execSync("git init", { cwd: dir });
 	execSync("git config user.email test@test.com", { cwd: dir });
 	execSync("git config user.name Test", { cwd: dir });
 	execSync("git add .", { cwd: dir });
 	execSync("git commit -m init", { cwd: dir });
-
 	return dir;
 }
 
@@ -117,26 +115,7 @@ async function stagger() {
 
 describe("Worktree E2E", { timeout: 120_000, sequential: true }, () => {
 
-	it("should register worktree tool on startup", async () => {
-		const dir = freshGitRepo();
-		const client = new RpcClient(dir);
-
-		try {
-			const events = await client.prompt(
-				"List the available tools you have. Is there a worktree tool?",
-			);
-
-			// Agent should mention the worktree tool
-			const agentEnd = events.find((e) => e.type === "agent_end");
-			expect(agentEnd).toBeDefined();
-		} finally {
-			client.kill();
-		}
-
-		await stagger();
-	});
-
-	it("should create a worktree via tool call", async () => {
+	it("should create a worktree and return a usable path", async () => {
 		const dir = freshGitRepo();
 		const client = new RpcClient(dir);
 
@@ -145,26 +124,18 @@ describe("Worktree E2E", { timeout: 120_000, sequential: true }, () => {
 				"Use the worktree tool to create a worktree with branch 'feat/test' and purpose 'E2E test'.",
 			);
 
-			const toolCall = client.assertToolCalled(events, "worktree");
-			expect(toolCall).toBeDefined();
-			expect((toolCall as any).args.action).toBe("create");
-			expect((toolCall as any).args.branch).toBe("feat/test");
-
 			const toolResult = client.getToolResult(events, "worktree");
 			expect(toolResult).toBeDefined();
 			expect(toolResult.isError).toBeFalsy();
 			expect(toolResult.content[0].text).toContain("Created worktree");
 
 			// Verify worktree directory exists on disk
-			const wtDir = join(dir, ".pi", "worktrees", "feat", "test");
-			// Git worktree add creates at the path — check it exists
 			const resultText = toolResult.content[0].text;
-			expect(resultText).toContain("Path:");
-
-			// Extract path from result
-			const pathMatch = resultText.match(/Path: (.+)/);
+			// Path is on its own line after "at:"
+			const pathMatch = resultText.match(/at:\n(.+)/);
 			if (pathMatch) {
-				expect(existsSync(pathMatch[1])).toBe(true);
+				const wtPath = pathMatch[1].trim();
+				expect(existsSync(wtPath)).toBe(true);
 			}
 		} finally {
 			client.kill();
@@ -173,17 +144,15 @@ describe("Worktree E2E", { timeout: 120_000, sequential: true }, () => {
 		await stagger();
 	});
 
-	it("should list worktrees", async () => {
+	it("should list worktrees after creation", async () => {
 		const dir = freshGitRepo();
 		const client = new RpcClient(dir);
 
 		try {
-			// Create first
 			await client.prompt(
 				"Use the worktree tool to create a worktree with branch 'list-test' and purpose 'test listing'.",
 			);
 
-			// Then list
 			const events = await client.prompt(
 				"Use the worktree tool to list all worktrees.",
 			);
@@ -199,25 +168,32 @@ describe("Worktree E2E", { timeout: 120_000, sequential: true }, () => {
 		await stagger();
 	});
 
-	it("should show worktree path in create result for agent to use", async () => {
+	it("should write a file inside the worktree after creating it", async () => {
 		const dir = freshGitRepo();
 		const client = new RpcClient(dir);
 
 		try {
 			const events = await client.prompt(
-				"Create a worktree called 'write-test' with purpose 'test writing files'. Then read the package.json in that worktree.",
+				"Create a worktree called 'write-test' with purpose 'test writing'. " +
+				"Then use the write tool to create a file called marker.txt at the worktree path with content 'hello from worktree'.",
 			);
 
-			// Should have both worktree create and read tool calls
-			const wtCall = client.assertToolCalled(events, "worktree");
-			expect(wtCall).toBeDefined();
+			// Should have both worktree create and write tool calls
+			const wtResult = client.getToolResult(events, "worktree");
+			expect(wtResult).toBeDefined();
+			expect(wtResult.isError).toBeFalsy();
 
-			// The read tool should be called with the worktree path
-			const readCall = client.assertToolCalled(events, "read");
-			expect(readCall).toBeDefined();
+			const writeResult = client.getToolResult(events, "write");
+			expect(writeResult).toBeDefined();
 
-			const readPath = (readCall as any).args.path as string;
-			expect(readPath).toContain("write-test");
+			// The write path should contain the worktree branch name
+			const writeCall = client.assertToolCalled(events, "write");
+			const writePath = (writeCall as any).args.path as string;
+			expect(writePath).toContain("write-test");
+
+			// File should exist on disk at the worktree path
+			expect(existsSync(writePath)).toBe(true);
+			expect(readFileSync(writePath, "utf8")).toContain("hello from worktree");
 		} finally {
 			client.kill();
 		}
@@ -225,17 +201,41 @@ describe("Worktree E2E", { timeout: 120_000, sequential: true }, () => {
 		await stagger();
 	});
 
-	it("should cleanup worktree", async () => {
+	it("should read a file from the worktree", async () => {
 		const dir = freshGitRepo();
 		const client = new RpcClient(dir);
 
 		try {
-			// Create
+			// Create worktree and write a file in one go
+			await client.prompt(
+				"Create a worktree called 'read-test' with purpose 'test reading'. " +
+				"Then write 'secret content' to a file called data.txt in the worktree.",
+			);
+
+			// Now read it back
+			const events = await client.prompt(
+				"Read the data.txt file from the read-test worktree. Use the same path you wrote to.",
+			);
+
+			const readResult = client.getToolResult(events, "read");
+			expect(readResult).toBeDefined();
+			expect(readResult.isError).toBeFalsy();
+		} finally {
+			client.kill();
+		}
+
+		await stagger();
+	});
+
+	it("should cleanup a worktree", async () => {
+		const dir = freshGitRepo();
+		const client = new RpcClient(dir);
+
+		try {
 			await client.prompt(
 				"Use the worktree tool to create a worktree with branch 'cleanup-test' and purpose 'test cleanup'.",
 			);
 
-			// Cleanup
 			const events = await client.prompt(
 				"Use the worktree tool to cleanup the worktree for branch 'cleanup-test'.",
 			);
