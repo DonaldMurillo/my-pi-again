@@ -363,6 +363,8 @@ interface BoardState {
 	expanded: Set<string>; // expanded task IDs for verbose view
 }
 
+import { truncateToWidth } from "../shared/text.js";
+
 function renderTaskBoard(
 	theme: Theme,
 	state: BoardState,
@@ -745,23 +747,6 @@ TaskArchive({ status }) — archive completed
 				for (let i = 0; i < Math.min(doneTodos.length, 2); i++) {
 					themed.push(theme.fg("dim", theme.strikethrough(`✓ ${doneTodos[i].content}`)));
 				}
-				const truncateToWidth = (line: string, maxW: number): string => {
-					let vis = 0, cutPos = line.length, idx = 0;
-					while (idx < line.length) {
-						if (line[idx] === '\x1b') {
-							const end = line.indexOf('m', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						if (line[idx] === ']' && line[idx + 1] === '8' && line[idx + 2] === ';' && line[idx + 3] === ';') {
-							const end = line.indexOf('\x07', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						vis++;
-						if (vis > maxW - 1) { cutPos = idx; break; }
-						idx++;
-					}
-					return vis <= maxW - 1 ? line : line.slice(0, cutPos) + "\u2026";
-				};
 				return {
 					render(width: number): string[] { return themed.map((l) => truncateToWidth(l, width)); },
 					invalidate() {},
@@ -813,23 +798,6 @@ TaskArchive({ status }) — archive completed
 					else themed.push(theme.fg("text", line));
 					count++;
 				}
-				const truncateToWidth = (line: string, maxW: number): string => {
-					let vis = 0, cutPos = line.length, idx = 0;
-					while (idx < line.length) {
-						if (line[idx] === '\x1b') {
-							const end = line.indexOf('m', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						if (line[idx] === ']' && line[idx + 1] === '8' && line[idx + 2] === ';' && line[idx + 3] === ';') {
-							const end = line.indexOf('\x07', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						vis++;
-						if (vis > maxW - 1) { cutPos = idx; break; }
-						idx++;
-					}
-					return vis <= maxW - 1 ? line : line.slice(0, cutPos) + "\u2026";
-				};
 				return {
 					render(width: number): string[] { return themed.map((l) => truncateToWidth(l, width)); },
 					invalidate() {},

@@ -5,6 +5,8 @@
   "private": true,
   "scripts": {
     "sync": "npx tsx scripts/sync.ts",
+    "sync:force": "npx tsx scripts/sync.ts --skip-smoke",
+    "smoke": "npx tsx scripts/smoke-test.ts",
     "sync:dry": "npx tsx scripts/sync.ts --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",

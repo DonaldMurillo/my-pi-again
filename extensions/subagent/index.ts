@@ -16,6 +16,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { SubagentAPI } from "./api.js";
 import { loadConfig } from "./model-tiers.js";
 import { renderAgentSubItem, readResult } from "./task-bridge.js";
+import { truncateToWidth } from "../shared/text.js";
 
 export default function (pi: ExtensionAPI): void {
 	let api: SubagentAPI;
@@ -311,23 +312,6 @@ Model tiers: fast (glm-4.5-air), balanced (glm-5-turbo), deep (glm-5.1)
 				else lines.push(theme.fg("dim", line));
 			}
 
-				const truncateToWidth = (line: string, maxW: number): string => {
-					let vis = 0, cutPos = line.length, idx = 0;
-					while (idx < line.length) {
-						if (line[idx] === '\x1b') {
-							const end = line.indexOf('m', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						if (line[idx] === ']' && line[idx + 1] === '8' && line[idx + 2] === ';' && line[idx + 3] === ';') {
-							const end = line.indexOf('\x07', idx);
-							if (end >= 0) { idx = end + 1; continue; }
-						}
-						vis++;
-						if (vis > maxW - 1) { cutPos = idx; break; }
-						idx++;
-					}
-					return vis <= maxW - 1 ? line : line.slice(0, cutPos) + "\u2026";
-				};
 				return {
 					render(width: number): string[] { return lines.map((l) => truncateToWidth(l, width)); },
 					invalidate() {},

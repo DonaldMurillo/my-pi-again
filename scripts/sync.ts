@@ -17,10 +17,13 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const extensionsSrc = join(root, "extensions");
+const skillsSrc = join(root, "skills");
 const piAgentRoot = join(homedir(), ".pi", "agent");
 const extensionsDest = join(piAgentRoot, "extensions");
+const skillsDest = join(piAgentRoot, "skills");
 
 const dryRun = process.argv.includes("--dry-run");
+const skipSmoke = process.argv.includes("--skip-smoke");
 
 if (dryRun) console.log("[DRY RUN] No files will be written.\n");
 
@@ -28,6 +31,19 @@ async function syncExtensions() {
 	if (!existsSync(extensionsSrc)) {
 		console.error("No extensions/ directory found.");
 		process.exit(1);
+	}
+
+	// ── Run smoke tests first ──
+	if (!dryRun && !skipSmoke) {
+		console.log("Running smoke tests...\n");
+		const { execSync } = await import("node:child_process");
+		try {
+			execSync("npx tsx scripts/smoke-test.ts", { cwd: root, stdio: "inherit" });
+		} catch {
+			console.error("\n\x1b[31mSmoke tests failed — aborting sync.\x1b[0m");
+			process.exit(1);
+		}
+		console.log("");
 	}
 
 	const entries = await readdir(extensionsSrc, { withFileTypes: true });
@@ -79,6 +95,42 @@ async function syncExtensions() {
 			"utf8",
 		);
 		console.log("  → manifest.json written");
+	}
+
+	// ── Sync skills ──
+	if (existsSync(skillsSrc)) {
+		const skillEntries = await readdir(skillsSrc, { withFileTypes: true });
+		const skillDirs = skillEntries.filter(
+			(e) => e.isDirectory() && !e.name.startsWith(".") && existsSync(join(skillsSrc, e.name, "SKILL.md")),
+		);
+
+		if (skillDirs.length > 0) {
+			await mkdir(skillsDest, { recursive: true });
+			let skillSynced = 0;
+
+			for (const dir of skillDirs) {
+				const src = join(skillsSrc, dir.name);
+				const dest = join(skillsDest, dir.name);
+
+				if (dryRun) {
+					console.log(`  ✓  skill/${dir.name} → ${dest}`);
+					skillSynced++;
+					continue;
+				}
+
+				await rm(dest, { recursive: true, force: true });
+				await mkdir(dest, { recursive: true });
+				await cp(src, dest, { recursive: true, force: true });
+				console.log(`  ✓  skill/${dir.name}`);
+				skillSynced++;
+			}
+
+			console.log(`\nSynced ${skillSynced} skill${skillSynced !== 1 ? "s" : ""} → ${skillsDest}`);
+		} else {
+			console.log("\nNo skills to sync.");
+		}
+	} else {
+		console.log("\nNo skills/ directory found.");
 	}
 }
 
