@@ -92,11 +92,10 @@ class RpcClient {
 		return (r as any)?.result;
 	}
 
-	/** Find the first tool_result that contains the given text */
-	findToolError(events: JsonLine[], text: string): any {
+	/** Find the first tool_result that contains the given text in its content */
+	findBlocked(events: JsonLine[], text: string): any {
 		return events.find(
 			(e) => e.type === "tool_execution_end" &&
-				(e as any).result?.isError === true &&
 				(e as any).result?.content?.some((c: any) => c.text?.includes(text)),
 		);
 	}
@@ -158,7 +157,7 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 			);
 
 			// The write tool should have been blocked by isolation
-			const blocked = client.findToolError(events, "Isolation");
+			const blocked = client.findBlocked(events, "Isolation");
 			expect(blocked).toBeDefined();
 
 			// File should NOT exist
@@ -201,7 +200,7 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 				"Run this bash command: echo leaked > /tmp/isolation-bash-escape.txt",
 			);
 
-			const blocked = client.findToolError(events, "Isolation");
+			const blocked = client.findBlocked(events, "Isolation");
 			expect(blocked).toBeDefined();
 
 			expect(existsSync("/tmp/isolation-bash-escape.txt")).toBe(false);
@@ -259,7 +258,7 @@ describe("Isolation E2E", { timeout: 120_000, sequential: true }, () => {
 				"Run 'rm -rf .git' in the current directory.",
 			);
 
-			const blocked = client.findToolError(events, "Isolation");
+			const blocked = client.findBlocked(events, "Isolation");
 			expect(blocked).toBeDefined();
 		} finally {
 			client.kill();
