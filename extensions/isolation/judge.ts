@@ -121,7 +121,7 @@ function parseVerdict(raw: string): JudgeVerdict {
 export const DEFAULT_AUTO_MODE: AutoModeConfig = {
 	enabled: true,
 	judgeProvider: "zai",
-	judgeModel: "glm-5.1",
+	judgeModel: "glm-5-turbo",
 	judgeTimeout: 8000,
 };
 
