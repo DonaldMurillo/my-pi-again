@@ -157,6 +157,17 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 			const autoTag = config.autoMode ? "auto" : "manual";
 			const branchTag = branch ? ` ${branch}` : "";
 			ctx.ui.setStatus("isolation", `locked ${autoTag}${branchTag}  ${cwd}`);
+
+			// Warn if judge model isn't available (will fail-open to allow)
+			if (config.autoMode) {
+				const model = ctx.modelRegistry.find(config.judgeProvider ?? DEFAULT_AUTO_MODE.judgeProvider, config.judgeModel);
+				if (!model) {
+					ctx.ui.notify(
+						`⚠️ Isolation judge model not found (${config.judgeProvider}/${config.judgeModel}). Ambiguous commands will be BLOCKED. Fix: /isolation auto to reconfigure, or /isolation off to bypass.`,
+						"warning",
+					);
+				}
+			}
 		}
 	});
 

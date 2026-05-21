@@ -121,7 +121,7 @@ function parseVerdict(raw: string): JudgeVerdict {
 export const DEFAULT_AUTO_MODE: AutoModeConfig = {
 	enabled: true,
 	judgeProvider: "zai",
-	judgeModel: "glm-5-turbo",
+	judgeModel: "glm-5.1",
 	judgeTimeout: 8000,
 };
 
@@ -162,16 +162,16 @@ export async function judgeCommand(
 	// Resolve model through pi's registry
 	const model = findModel(config.judgeProvider, config.judgeModel);
 	if (!model) {
-		return { safe: false, reason: `Judge model ${config.judgeProvider}/${config.judgeModel} not found` };
+		return { safe: false, reason: `Judge model ${config.judgeProvider}/${config.judgeModel} not found. Use /isolation auto to reconfigure, or /isolation off to bypass.` };
 	}
 
 	// Resolve auth through pi's registry (handles OAuth, API keys, env vars)
 	const auth = await getAuth(model);
 	if (!auth.ok) {
-		return { safe: false, reason: `Judge auth failed: ${auth.error}` };
+		return { safe: false, reason: `Judge auth failed: ${auth.error}. Use /isolation off to bypass.` };
 	}
 	if (!auth.apiKey) {
-		return { safe: false, reason: `No API key for judge provider "${config.judgeProvider}"` };
+		return { safe: false, reason: `No API key for judge provider "${config.judgeProvider}". Use /isolation off to bypass.` };
 	}
 
 	try {
