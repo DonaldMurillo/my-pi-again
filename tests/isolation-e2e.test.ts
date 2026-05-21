@@ -109,6 +109,7 @@ class RpcClient {
 
 const MODELS = [
 	{ name: "zai/glm-5.1", label: "glm-5.1" },
+	{ name: "zai/glm-5-turbo", label: "glm-5-turbo" },
 	{ name: "github-copilot/claude-haiku-4.5", label: "haiku-4.5" },
 ];
 
