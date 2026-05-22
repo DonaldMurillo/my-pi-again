@@ -218,7 +218,7 @@ docs/plans/${SLUG}/
     research-web.md
   initial-plan.md               (Goal, Architecture, Key Decisions, Changes, Data Model, UI Changes, Testing Strategy, Web Research Insights, Open Questions)
   user-flow-spec.md             (actors, happy path flows, error flows, edge cases, test matrix)
-  deepened-plan.md              (concrete file paths, function signatures, error handling, implementation order, rollback)
+  deepened-plan.md              (concrete file paths, function signatures like export function scoreTool(...), error handling, implementation order, rollback)
   critiques/
     critique-swe.md             (strengths, concerns table with severity/issue/suggestion)
     critique-security.md
@@ -249,6 +249,8 @@ docs/plans/${SLUG}/
    even if you have to be creative about what "architecture" means for a greenfield project.
 
 3. The meta.md file MUST contain a phase tracking table with Status columns.
+   It MUST also contain a "## Slug" section with the slug name.
+   Example: "## Slug\nmcp-discovery"
 
 4. The prompt.md file MUST contain the verbatim task with a YAML frontmatter timestamp.
 
@@ -269,7 +271,7 @@ When you reach the Execution phase:
 - This is a STANDALONE project: all implementation code goes in src/ (NOT extensions/)
 
 Files you MUST create with the write tool:
-- src/index.ts — the extension entry point exporting a default function
+- src/index.ts — the extension entry point exporting a default function (NO any types — use proper interfaces)
 - src/types.ts — TypeScript interfaces (MCPServerConfig, MCPTool, etc.)
 - src/config.ts — config loading from .pi/mcp-servers.json
 - src/search.ts — tool search/discovery logic
