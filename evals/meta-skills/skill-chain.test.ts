@@ -271,10 +271,10 @@ When you reach the Execution phase:
 - This is a STANDALONE project: all implementation code goes in src/ (NOT extensions/)
 
 Files you MUST create with the write tool:
-- src/index.ts — the extension entry point exporting a default function (NO any types — use proper interfaces)
+- src/index.ts — the extension entry point exporting a default function (NO any types — use proper interfaces). MUST register: registerTool for search_mcp_tools, registerTool for list_mcp_servers, registerCommand for /mcp
 - src/types.ts — TypeScript interfaces (MCPServerConfig, MCPTool, etc.)
 - src/config.ts — config loading from .pi/mcp-servers.json
-- src/search.ts — tool search/discovery logic
+- src/search.ts — tool search/discovery logic (MUST export at least 3 functions: scoreTool, searchTools, buildToolIndex)
 - src/search.test.ts — vitest tests (MUST include: multi-word query tests, edge cases, scoring order verification)
 
 ## CRITICAL: CRITIQUES MUST BE SUBSTANTIVE
