@@ -298,16 +298,29 @@ function hashString(str: string): string {
 }
 
 function findPersistentGaps(history: Array<{ gaps: string[]; wasFallback: boolean }>): string[] {
-	if (history.length < 3) return [];
+	if (history.length < 2) return [];
 	const recent = history.slice(-5);
 	const gapCounts = new Map<string, number>();
 	for (const eval_ of recent) {
 		if (eval_.wasFallback) continue;
 		for (const gap of eval_.gaps) {
-			// Normalize: lowercase, strip punctuation
-			const normalized = gap.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+			const normalized = gap.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 			if (normalized.length < 5) continue;
-			gapCounts.set(normalized, (gapCounts.get(normalized) ?? 0) + 1);
+			// Check for keyword overlap with existing gaps
+			const words = new Set(normalized.split(" ").filter(w => w.length > 3));
+			let matched = false;
+			for (const [existing] of gapCounts) {
+				const existingWords = new Set(existing.split(" ").filter(w => w.length > 3));
+				const overlap = [...words].filter(w => existingWords.has(w)).length;
+				if (overlap >= 2) {
+					matched = true;
+					gapCounts.set(existing, (gapCounts.get(existing) ?? 0) + 1);
+					break;
+				}
+			}
+			if (!matched) {
+				gapCounts.set(normalized, 1);
+			}
 		}
 	}
 	return [...gapCounts.entries()]

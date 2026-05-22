@@ -88,8 +88,8 @@ const ALLOWED_COMMAND_PATTERNS = [
 	/^\s*false\b/,
 	/^\s*test\b/,
 	/^\s*\[\s/,
-	/^\s*printf\b/,
-	/^\s*ln\s+-s\b/			// symlink (not -sf force)
+	/\^\s*printf\b/,
+	/\^\s*ln\s+-s\b/			// symlink (not -sf force)
 ];
 
 // Interpreted languages that can do anything — always restricted

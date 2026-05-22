@@ -121,7 +121,15 @@ Rules:
 - Every fix must be actionable — not "improve X" but "add Y to file Z line N"
 - If tests were mentioned, check they actually exist and pass
 - If documentation was mentioned, check it exists
-- Be ruthless. Half-done is not done.`,
+- Be ruthless. Half-done is not done.
+
+STUCK LOOP DETECTION — this is critical:
+If the agent is repeatedly trying the same failing approach (blocked commands, repeated errors,
+workarounds that don't work, asking the user the same question), treat that as a HIGH priority gap.
+The fix should address the ROOT CAUSE (e.g., "fix isolation config", "use /isolation off") not the
+symptom (e.g., "try a different command"). If the agent has tried 3+ approaches to the same
+problem without success, the fix should suggest a completely different strategy or escalating
+to the user for help.`,
 		color: "error",
 		icon: "🧐",
 	},
