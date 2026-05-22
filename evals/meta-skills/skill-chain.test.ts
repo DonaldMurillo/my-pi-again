@@ -166,200 +166,8 @@ export default defineConfig({
 	return dir;
 }
 
-/**
- * Build a pipeline directive for testing. This directive tells GLM to follow
- * the deep-* skills EXACTLY, producing the same artifact tree that metacollector
- * produces (28+ files across 9 phases).
- */
-function buildTestPipelineDirective(skillDirs: string[]): string {
-	const skillsRoot = skillDirs[0] || "skills";
-
-	return `# Deep Pipeline Directive
-
-You are running a fully autonomous deep-* pipeline. Execute it NOW.
-
-## CRITICAL: Follow skills EXACTLY
-
-Each skill file contains precise instructions for what files to create, what
-content they must contain, and what directory structure to use. Read each skill
-carefully and follow its instructions word-for-word. Do NOT improvise or skip
-steps.
-
-## Pipeline Phases
-
-Execute these phases IN ORDER. For each phase, read the skill file, then follow
-its instructions to create ALL required files on disk.
-
-| # | Phase | Skill File | What It Produces |
-|---|-------|------------|------------------|
-| 1 | Plan | ${skillsRoot}/deep-plan/SKILL.md | Research (8 files), Initial Plan, Flow Spec, Deepened Plan, Critiques (4 files), Q&A, Final Plan, Task Graph |
-| 2 | Execute | ${skillsRoot}/deep-execute/SKILL.md | Task Breakdown, Task Log, Implementation code |
-| 3 | Review | ${skillsRoot}/deep-review/SKILL.md | Test results, review findings |
-| 4 | Complete | ${skillsRoot}/deep-complete/SKILL.md | Commit plan, doc manifest, insights |
-
-## Directory Structure (MANDATORY)
-
-All planning artifacts go in: docs/plans/${SLUG}/
-
-You MUST create this structure (this is what a real pipeline produces):
-
-docs/plans/${SLUG}/
-  invariants.md
-  meta.md                       (phase tracking table with Status columns)
-  prompt.md                     (verbatim task description with timestamp)
-  research/
-    locate-codebase.md
-    locate-docs.md
-    locate-git-history.md
-    locate-patterns.md
-    research-architecture.md
-    research-domain.md
-    research-patterns.md
-    research-web.md
-  initial-plan.md               (Goal, Architecture, Key Decisions, Changes, Data Model, UI Changes, Testing Strategy, Web Research Insights, Open Questions)
-  user-flow-spec.md             (actors, happy path flows, error flows, edge cases, test matrix)
-  deepened-plan.md              (concrete file paths, function signatures like export function scoreTool(...), error handling, implementation order, rollback)
-  critiques/
-    critique-swe.md             (strengths, concerns table with severity/issue/suggestion)
-    critique-security.md
-    critique-perf.md
-    critique-ux.md
-  questions.md                  (auto-resolved Q&A with decision rationale)
-  final-plan.md                 (canonical plan: summary, Q&A resolutions, architecture, data model, new files, modified files, flows, testing strategy, implementation order)
-  execution/
-    task-breakdown.md           (dependency graph, batch assignments, task details)
-    task-log.md                 (task status tracking — REAL status, not aspirational)
-  review/
-    test-results.md             (REAL output from running tsc --noEmit and vitest run)
-  complete/
-    commit-plan.md              (structured commit plan with files and messages)
-    doc-manifest.md             (documentation changes)
-  insights.md                  (web research highlights, deferred suggestions, patterns, trade-offs)
-
-## Key Rules
-
-1. ALL research content comes from reading the project directory and web knowledge.
-   Since this is a GREENFIELD project (no existing codebase), focus research on:
-   - What MCP (Model Context Protocol) is and how it works
-   - How pi extensions work (read any README or docs in the project)
-   - Best practices for tool discovery/search systems
-   - How similar projects structure their code
-
-2. Number your research files exactly as shown (research-architecture.md, etc.)
-   even if you have to be creative about what "architecture" means for a greenfield project.
-
-3. The meta.md file MUST contain a phase tracking table with Status columns.
-   It MUST also contain a "## Slug" section with the slug name.
-   Example: "## Slug\nmcp-discovery"
-
-4. The prompt.md file MUST contain the verbatim task with a YAML frontmatter timestamp.
-
-5. Update meta.md after completing each phase.
-
-6. ALL src/ files MUST compile with tsc --noEmit and pass vitest run.
-
-7. Do NOT skip phases. Do NOT skip files. Every file listed above must exist.
-
-## CRITICAL: IMPLEMENTATION MUST BE REAL CODE
-
-When you reach the Execution phase:
-- You MUST use the write tool to create actual TypeScript files in src/
-- You MUST NOT just describe what files would contain — write them
-- You MUST NOT mark tasks as done without creating the actual files on disk
-- The task-log should reflect REALITY, not aspiration
-- After writing each file, verify it exists by reading it back
-- This is a STANDALONE project: all implementation code goes in src/ (NOT extensions/)
-
-Files you MUST create with the write tool:
-- src/index.ts — the extension entry point exporting a default function (NO any types — use proper interfaces). MUST register: registerTool for search_mcp_tools, registerTool for list_mcp_servers, registerCommand for /mcp
-- src/types.ts — TypeScript interfaces (MCPServerConfig, MCPTool, etc.)
-- src/config.ts — config loading from .pi/mcp-servers.json
-- src/search.ts — tool search/discovery logic (MUST export at least 3 functions: scoreTool, searchTools, buildToolIndex)
-- src/search.test.ts — vitest tests (MUST include: multi-word query tests, edge cases, scoring order verification)
-
-## CRITICAL: CRITIQUES MUST BE SUBSTANTIVE
-
-Each critique file MUST:
-- Reference specific sections of deepened-plan.md by name
-- List at least 5 concerns with severity (High/Medium/Low)
-- For each concern: quote the specific plan text, explain the risk, suggest a concrete fix
-- Include a "Missing from plan" section for things the plan overlooks
-
-Generic advice like "add error handling" or "consider caching" is NOT a critique.
-A real critique says: "The plan's searchTools function on line 45 of deepened-plan.md does not
-handle the case where inputSchema is undefined — this will cause a runtime TypeError when
-building the tool index. Fix: add a null guard: inputSchema ?? { type: 'object' }"
-
-## CRITICAL: REVIEW MUST ACTUALLY RUN
-
-When you reach the Review phase:
-- You MUST run "npm install" then "npx tsc --noEmit" and capture the output
-- You MUST run "npx vitest run" and capture the output
-- Write the REAL test results to the review output, not aspirational ones
-- If tests fail, fix the code and re-run until they pass
-- The task-log must show REAL pass/fail status, not fictional timestamps
-
-## CRITICAL: INSIGHTS MUST EXIST
-
-Create insights.md with:
-- Web Research Highlights: 3-5 specific findings from research with URLs/sources
-- Patterns Discovered: new patterns that emerged during implementation
-- Trade-off Decisions: key decisions with rationale (table format)
-- Process Improvements: what the pipeline could do better next time
-
-## Implementation File Structure
-
-This is a standalone TypeScript project with this setup:
-- package.json already exists with typescript + vitest dependencies
-- tsconfig.json already exists targeting ES2022
-- src/ directory already exists
-
-Your implementation files go in src/:
-- src/index.ts — Export default function that registers tools
-- src/types.ts — Interfaces and types
-- src/config.ts — Configuration loading
-- src/search.ts — Search/discovery logic  
-- src/search.test.ts — Tests using vitest
-
-## CRITICAL: DEEPENED PLAN MUST HAVE IMPLEMENTATION ORDER
-
-The deepened-plan.md MUST contain an "Implementation Order" section that lists
-the exact sequence in which files/functions should be built. This is not optional.
-Use a heading like "## Implementation Order" or "## Build Sequence".
-
-## CRITICAL: TESTS MUST COVER MULTI-WORD QUERIES
-
-The search.test.ts file MUST include at least one test case for multi-word queries
-(e.g., searching for "file system" or "git commit" should return relevant results).
-Use describe blocks like "multi-word queries" or "multi-word search".
-
-## CRITICAL: Q&A RESOLUTIONS MUST HAVE CONFIDENCE
-
-Each question resolution in questions.md MUST include a confidence level.
-Format: "Confidence: High/Medium/Low" after each resolution.
-Example: "Resolution: [AUTO-RESOLVED] Option (A). ... Confidence: High."
-
-## CRITICAL: TASK-LOG MUST HAVE VERIFICATION SECTION
-
-The execution/task-log.md file MUST include a "## Verification" section at the bottom
-that shows the actual output of running "tsc --noEmit" and "npx vitest run".
-Do NOT skip this — it proves the code works.
-
-## CRITICAL: TESTS MUST COVER ERROR CASES
-
-The search.test.ts file MUST have test cases for error scenarios:
-- Empty search query
-- Malformed input
-- Null/undefined values in tool data
-- Config file not found
-Use describe blocks like "error handling" or "edge cases".
-
-## First Action
-
-Read ${skillsRoot}/deep-plan/SKILL.md and follow its instructions starting from
-Step 0 (Initialize). Create docs/plans/${SLUG}/ and begin the pipeline.
-`;
-}
+// No buildTestPipelineDirective — the extension's resources_discover hook
+// generates the pipeline directive automatically from the skill files.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Part 1: Resolver unit tests
@@ -579,19 +387,18 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 	it("produces full pipeline artifact tree + working code", async () => {
 		const dir = freshProject("glm-5.1");
 
-		// Build the pipeline directive
-		const skillDirs = [SKILLS_DIR];
-		const pipelineDirective = buildTestPipelineDirective(skillDirs);
-
-		// Write the directive as INSTRUCTIONS.md
-		writeFileSync(join(dir, "INSTRUCTIONS.md"), pipelineDirective);
+		// The skill-chain extension will auto-generate a pipeline directive
+		// via its resources_discover hook when it sees .pi/skill-chain.json.
+		// No need to write a manual INSTRUCTIONS.md — the extension handles it.
 
 		const client = new RpcClient(dir, MODEL);
 
 		try {
-			const prompt =
-				"Read INSTRUCTIONS.md and follow all instructions exactly. " +
-				"Then execute the full pipeline for this task: " + TASK_DESCRIPTION;
+			const prompt = TASK_DESCRIPTION +
+				" Write all implementation code in src/. " +
+				"Follow the active pipeline directive. " +
+				"Use TaskCreate to create tasks for each phase, then work through them with TaskNext. " +
+				"Read each skill file when you start its task.";
 
 			const events = await client.prompt(prompt);
 			const text = client.getTextResponse(events);

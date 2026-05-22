@@ -274,14 +274,49 @@ export async function checkPipeline(
 	}
 
 	// ════════════════════════════════════════════
-	// REVIEW — honest or theater?
+	// REVIEW — multi-round review cycle?
 	// ════════════════════════════════════════════
 
-	const review = tryRead(join(slugDir, "review", "test-results.md")) ?? "";
-	checks.push(D("review-has-verdict", "Review", "review has verdict (PASS / Meets Standards)", /meets standards|\*\*pass\*\*|result:\s*pass|verdict.*pass|# verdict/i.test(review), /meets standards|\*\*pass\*\*|result:\s*pass|verdict.*pass|# verdict/i.test(review) ? "found" : "missing"));
-	checks.push(D("review-has-pass-fail", "Review", "review shows pass/fail counts", /\d+\s*(pass|fail|test)/i.test(review), /\d+\s*(pass|fail|test)/i.test(review) ? "found" : "missing"));
-	checks.push(D("review-has-tsc-output", "Review", "review shows tsc compilation result", /tsc|typescript|0 error|compilation/i.test(review), /tsc|typescript|0 error|compilation/i.test(review) ? "found" : "missing"));
-	checks.push(D("review-is-substantial", "Review", "review is 500+ chars (not a one-liner)", review.length >= 500, `${review.length} chars`));
+	// Check for round directories (the real deep-review structure)
+	const reviewDir = join(slugDir, "review");
+	const roundDirs = existsSync(reviewDir)
+		? readdirSync(reviewDir, { withFileTypes: true })
+			.filter(d => d.isDirectory() && d.name.startsWith("round-"))
+			.map(d => d.name)
+		: [];
+
+	checks.push(D("review-has-3-plus-rounds", "Review Rounds", "review has 3+ round directories (round-1, round-2, round-3)", roundDirs.length >= 3, `${roundDirs.length} round dirs: ${roundDirs.join(", ") || "none"}`));
+
+	// Each round should have reviewer files
+	const reviewerNames = ["quality", "security", "completeness", "test-runner"];
+	for (const round of roundDirs) {
+		for (const reviewer of reviewerNames) {
+			const c = tryRead(join(reviewDir, round, `${reviewer}.md`));
+			checks.push(D(`review-round-file:${round}/${reviewer}`, "Review Rounds", `${round}/${reviewer}.md exists with content`, !!c && c.length > 50, c ? `${c.length} chars` : "missing"));
+		}
+	}
+
+	// Check for summary
+	const summaryFile = tryRead(join(reviewDir, "summary.md")) ?? "";
+	checks.push(D("review-has-summary", "Review Rounds", "review/summary.md exists", summaryFile.length > 50, `${summaryFile.length} chars`));
+	checks.push(D("summary-has-round-count", "Review Rounds", "summary lists round count", /\d+\s*round/i.test(summaryFile), /\d+\s*round/i.test(summaryFile) ? "found" : "missing"));
+	checks.push(D("summary-has-findings-count", "Review Rounds", "summary lists total findings", /finding|issue/i.test(summaryFile), /finding|issue/i.test(summaryFile) ? "found" : "missing"));
+	checks.push(D("summary-has-verdict", "Review Rounds", "summary has PASS/NEEDS FIXES verdict", /PASS|NEEDS FIXES|Meets Standards/i.test(summaryFile), /PASS|NEEDS FIXES|Meets Standards/i.test(summaryFile) ? "found" : "missing"));
+
+	// Still check test-results.md for backward compat
+	const review = tryRead(join(reviewDir, "test-results.md")) ?? "";
+	checks.push(D("review-has-test-results", "Review Output", "review/test-results.md exists with tsc+vitest output", review.length > 50, `${review.length} chars`));
+	checks.push(D("review-test-results-has-runs", "Review Output", "test-results shows tests were actually run", /RC:0|exit code.*0|passed|failed/i.test(review), /RC:0|exit code.*0|passed|failed/i.test(review) ? "found" : "missing"));
+
+	// At least one round must show findings + fixes
+	const anyRoundHasFixes = roundDirs.some(round => {
+		for (const reviewer of reviewerNames) {
+			const c = tryRead(join(reviewDir, round, `${reviewer}.md`)) ?? "";
+			if (/fix|issue|concern|finding|suggestion/i.test(c)) return true;
+		}
+		return false;
+	});
+	checks.push(D("review-rounds-have-findings", "Review Rounds", "at least one reviewer found real issues", anyRoundHasFixes, anyRoundHasFixes ? "found issues" : "no issues found — suspicious"));
 
 	// ════════════════════════════════════════════
 	// INSIGHTS — real learnings?

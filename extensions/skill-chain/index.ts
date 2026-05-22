@@ -118,7 +118,7 @@ Generate a kebab-case slug from the user's request. Then use TaskCreate to creat
     TaskCreate({ subject: "Preflight — infrastructure checks", description: "Read skill file: ${skillsRoot}/deep-auto/SKILL.md. Run preflight checks.", labels: ["pipeline", "skill:deep-auto"] })
     TaskCreate({ subject: "Planning — research, plan, spec, critiques, final plan", description: "Read skill file: ${skillsRoot}/deep-plan/SKILL.md. Follow ALL phases: research/ (8 files), initial-plan.md, user-flow-spec.md, deepened-plan.md, critiques/ (4 files), questions.md, final-plan.md. Create EVERY file the skill specifies.", labels: ["pipeline", "skill:deep-plan"] })
     TaskCreate({ subject: "Execution — task breakdown + implementation", description: "Read skill file: ${skillsRoot}/deep-execute/SKILL.md. Create execution/task-breakdown.md, execution/task-log.md. Implement code.", labels: ["pipeline", "skill:deep-execute"] })
-    TaskCreate({ subject: "Review — full test suite + fix cycles", description: "Read skill file: ${skillsRoot}/deep-review/SKILL.md. Run full test suite, spawn reviewers, triage, fix, verify.", labels: ["pipeline", "skill:deep-review"] })
+    TaskCreate({ subject: "Review — multi-round blind review + fix cycles", description: "Read skill file: ${skillsRoot}/deep-review/SKILL.md. Run at least 3 rounds. Each round: spawn blind reviewers (quality, security, completeness, test-runner), run full test suite, triage findings, fix, verify. Create review/round-1/ through review/round-3/ with reviewer files, plus review/summary.md.", labels: ["pipeline", "skill:deep-review"] })
     TaskCreate({ subject: "Completion — commit plan, docs, insights", description: "Read skill file: ${skillsRoot}/deep-complete/SKILL.md. Create complete/commit-plan.md, complete/doc-manifest.md, insights.md.", labels: ["pipeline", "skill:deep-complete"] })
 
 ### Step 2: Pick up the first task with TaskNext()
@@ -128,16 +128,16 @@ Generate a kebab-case slug from the user's request. Then use TaskCreate to creat
 ### Step 3: For each task — read the skill file, execute, mark done
 
 1. Read the skill file referenced in the task description
-2. Follow that skill's instructions to complete the phase
-3. Create all files the skill specifies on disk
+2. Follow that skill's instructions EXACTLY to complete the phase
+3. Create all files the skill specifies on disk using the write tool
 4. Mark the task completed: TaskUpdate({ taskId, status: "completed" })
 5. Call TaskNext() to get the next task
 
 ### Step 4: Create pipeline tracking docs
 
 Before starting Phase 1, create:
-- docs/plans/{slug}/meta.md — phase tracking table
-- docs/plans/{slug}/prompt.md — user's verbatim request
+- docs/plans/{slug}/meta.md — phase tracking table with dates and status per phase
+- docs/plans/{slug}/prompt.md — user's verbatim request with YAML timestamp
 
 Update meta.md as each phase completes.
 
@@ -147,32 +147,42 @@ By the end of the pipeline, these MUST exist on disk:
 
   docs/plans/{slug}/
     invariants.md
-    meta.md              — phase tracking table
+    meta.md              — phase tracking table with slug section
     prompt.md            — original task with timestamp
-    research/            — 8 research files (locate-codebase, locate-docs, locate-git-history, locate-patterns, research-architecture, research-domain, research-patterns, research-web)
-    initial-plan.md      — Goal, Architecture, Changes, Data Model, Testing Strategy
-    user-flow-spec.md    — actors, flows, error cases, test matrix
-    deepened-plan.md     — concrete and actionable version of initial plan
-    critiques/           — critique-swe.md, critique-security.md, critique-perf.md, critique-ux.md
-    questions.md         — auto-resolved Q&A with decisions
-    final-plan.md        — canonical plan incorporating all resolutions
+    research/            — 8 research files
+    initial-plan.md      — Goal, Architecture, Changes, Data Model, Testing Strategy, Open Questions
+    user-flow-spec.md    — actors, happy path flows, error flows, edge cases, test matrix
+    deepened-plan.md     — function signatures, error handling, implementation order, rollback
+    critiques/           — 4 critiques, each with 5+ severity-tagged concerns and Missing from Plan section
+    questions.md         — auto-resolved Q&A with confidence levels
+    final-plan.md        — canonical plan with Q&A resolutions and implementation order
     execution/
       task-breakdown.md  — dependency graph, batch assignments
-      task-log.md        — task status tracking
+      task-log.md        — task status + verification section with tsc/vitest output
+    review/
+      round-1/           — quality.md, security.md, completeness.md, test-runner.md
+      round-2/           — quality.md, security.md, completeness.md, test-runner.md
+      round-3/           — quality.md, security.md, completeness.md, test-runner.md
+      summary.md         — round count, findings, fixes, verdict
+      test-results.md    — REAL tsc + vitest output
     complete/
-      commit-plan.md     — structured commits
+      commit-plan.md     — structured commits with file lists
       doc-manifest.md    — documentation changes
-    insights.md          — learnings, trade-offs, patterns
+    insights.md          — research highlights, trade-offs, patterns, improvements
 
-  src/ — implementation files that compile and pass tests
+  src/ — implementation files that compile (tsc --noEmit) and pass tests (vitest run)
 
 ## Key Rules
 
 - **One skill per task** — read only the skill file for the current task, not all skills
-- **Write to disk** — use the write tool to create actual files
+- **Follow skills EXACTLY** — each skill describes precise steps and output formats. Do not improvise.
+- **Write to disk** — use the write tool to create actual files, not just describe them
 - **Update meta.md** — track progress after each phase
 - **Do not skip phases** — complete each one before moving on
 - **Use TaskNext/TaskUpdate** — the task system persists across context compaction
+- **No any types** — use proper TypeScript interfaces, not any
+- **Review must be multi-round** — at least 3 rounds with blind reviewers, not a single test run
+- **Implementation must be real** — write actual TypeScript code, not documentation of what you'd write
 `;
 }
 
