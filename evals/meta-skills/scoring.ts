@@ -797,24 +797,38 @@ async function callLLMJudge(
 
 				const text = parts.join("");
 
-				// Parse JSON from response
+				// Parse JSON from response — find the last JSON object (most likely the scores)
 				try {
-					const jsonMatch = text.match(/\{[\s\S]*?\}/);
-					if (jsonMatch) {
-						const parsed = JSON.parse(jsonMatch[0]);
+					const jsonMatches = [...text.matchAll(/\{[\s\S]*?\}/g)];
+					// Find the match that has the most score keys
+					let bestMatch: any = null;
+					let bestKeys = 0;
+					for (const m of jsonMatches) {
+						try {
+							const parsed = JSON.parse(m[0]);
+							const keys = ['plan_quality','critique_depth','code_plan_alignment','test_value','architecture','overall'];
+							const matchCount = keys.filter(k => typeof parsed[k] === 'number').length;
+							if (matchCount > bestKeys) {
+								bestKeys = matchCount;
+								bestMatch = parsed;
+							}
+						} catch { /* not valid json */ }
+					}
+
+					if (bestMatch) {
 						proc.kill();
 						resolve({
-							plan_quality: clamp(parsed.plan_quality),
-							critique_depth: clamp(parsed.critique_depth),
-							code_plan_alignment: clamp(parsed.code_plan_alignment),
-							test_value: clamp(parsed.test_value),
-							architecture: clamp(parsed.architecture),
-							overall: clamp(parsed.overall),
-							reasoning: parsed.reasoning ?? "",
+							plan_quality: clamp(bestMatch.plan_quality),
+							critique_depth: clamp(bestMatch.critique_depth),
+							code_plan_alignment: clamp(bestMatch.code_plan_alignment),
+							test_value: clamp(bestMatch.test_value),
+							architecture: clamp(bestMatch.architecture),
+							overall: clamp(bestMatch.overall),
+							reasoning: bestMatch.reasoning ?? "",
 						});
 					} else {
 						proc.kill();
-						resolve({ overall: 0, reasoning: "No JSON in LLM response" });
+						resolve({ overall: 0, reasoning: `No valid score JSON in LLM response (${text.length} chars, ${jsonMatches.length} JSON objects tried)` });
 					}
 				} catch (e: any) {
 					proc.kill();
