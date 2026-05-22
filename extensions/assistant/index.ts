@@ -36,12 +36,42 @@ import {
 	resolveLLMConfig,
 } from "./llm.js";
 import { openAssistantModal } from "./modal.js";
+import { bus } from "../observability/bus.js";
 
 // --- Shared state ---
 
 let _ctx: ExtensionContext | null = null;
 let _state: AssistantState | null = null;
 let _modalRender: (() => void) | null = null;
+
+// --- Bus-powered event accumulator ---
+// The assistant listens to the event bus in real-time and builds
+// a compact signal log that gets fed into AWTY evaluations.
+// This lets AWTY see isolation blocks, errors, and patterns
+// that aren't visible in conversation text alone.
+
+interface BusSignal {
+	type: string;
+	at: number;
+	detail: string;
+}
+
+let _signals: BusSignal[] = [];
+const MAX_SIGNALS = 100;
+
+function pushSignal(type: string, detail: string): void {
+	_signals.push({ type, at: Date.now(), detail });
+	if (_signals.length > MAX_SIGNALS) _signals = _signals.slice(-MAX_SIGNALS);
+}
+
+function getRecentSignals(sinceMs: number): BusSignal[] {
+	const cutoff = Date.now() - sinceMs;
+	return _signals.filter(s => s.at >= cutoff);
+}
+
+function resetSignals(): void {
+	_signals = [];
+}
 
 function getState(): AssistantState {
 	if (!_state) throw new Error("assistant: not initialized");
@@ -337,6 +367,12 @@ export default function (pi: ExtensionAPI) {
 		_state = createInitialState(ctx.cwd);
 		loadPersistedState(_state, ctx.cwd);
 		updateStatusLine(_state, ctx);
+
+		// Wire bus listeners for real-time awareness
+		bus.on("isolation:blocked", (d) => pushSignal("isolation:blocked", `${d.tool}: ${d.reason}`));
+		bus.on("isolation:allowed", (d) => pushSignal("isolation:allowed", `${d.tool} via ${d.via}`));
+		bus.on("agent:error", (d) => pushSignal("agent:error", `${d.type}: ${d.message}`));
+		bus.on("agent:idle", (d) => pushSignal("agent:idle", `turn ${d.turnCount} done (${d.durationMs}ms)`));
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -348,6 +384,7 @@ export default function (pi: ExtensionAPI) {
 			persistState(_state, _ctx.cwd);
 			clearStatusLine(_ctx);
 		}
+		resetSignals();
 	});
 
 	// --- Accumulate ALL agent turns into session history ---
@@ -411,6 +448,14 @@ export default function (pi: ExtensionAPI) {
 			const effectiveCwd = detectEffectiveCwd(agentMessages, ctx.cwd);
 			const fileSnapshot = extractFileSnapshot(agentMessages, effectiveCwd);
 
+			// --- Bus signals: real-time awareness ---
+			const signals = getRecentSignals(5 * 60 * 1000); // last 5 min
+			const blockedCount = signals.filter(s => s.type === "isolation:blocked").length;
+			const errorCount = signals.filter(s => s.type === "agent:error").length;
+			const signalContext = signals.length > 0
+				? signals.map(s => `[${new Date(s.at).toLocaleTimeString()}] ${s.type}: ${s.detail}`).join("\n")
+				: "(no events)";
+
 			// --- Feature: detect no change since last eval ---
 			const snapshotHash = hashString(fileSnapshot);
 			if (snapshotHash === state.lastSnapshotHash && state.evalHistory.length > 0) {
@@ -421,7 +466,7 @@ export default function (pi: ExtensionAPI) {
 			evalInProgress = true;
 			state.activity = "thinking";
 			updateStatusLine(state, ctx);
-			generateAreWeThereYet(profile, fullConversation, fileSnapshot, ctx, llmConfig, state.evalHistory)
+			generateAreWeThereYet(profile, fullConversation, fileSnapshot, ctx, llmConfig, state.evalHistory, signalContext)
 				.then((result) => {
 					evalInProgress = false;
 					state.activity = "idle";

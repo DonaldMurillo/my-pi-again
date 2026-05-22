@@ -32,6 +32,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { bus } from "../observability/bus.js";
 
 import {
 	isWithinBase,
@@ -188,8 +189,10 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 
 			const check = checkPath(filePath);
 			if (!check.allowed) {
+				bus.emit("isolation:blocked", { tool: toolName, path: filePath, reason: check.reason });
 				return { block: true, reason: check.reason };
 			}
+			bus.emit("isolation:allowed", { tool: toolName, path: filePath, via: "cwd" as const });
 		}
 
 		// Check bash for file-modifying commands
@@ -248,12 +251,14 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 
 					if (verdict?.safe) {
 						judgeStats.allowed++;
+						bus.emit("isolation:allowed", { tool: "bash", command: command.slice(0, 100), via: "judge" as const });
 						// Judge says safe — let it through
 						return;
 					}
 
 					if (verdict && !verdict.safe) {
 						judgeStats.blocked++;
+						bus.emit("isolation:blocked", { tool: "bash", command: command.slice(0, 100), reason: verdict.reason });
 						return {
 							block: true,
 							reason: `Isolation (judge): ${verdict.reason}. Command: "${command.slice(0, 80)}"`,
@@ -269,6 +274,7 @@ export default function registerIsolation(pi: ExtensionAPI): void {
 					reason: `Isolation: bash command may modify files outside the project directory. Command: "${command.slice(0, 100)}"`,
 				};
 			}
+			bus.emit("isolation:allowed", { tool: "bash", command: command.slice(0, 100), via: "safe" as const });
 		}
 
 		// All other tools (read, grep, etc.) are allowed

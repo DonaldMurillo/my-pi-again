@@ -125,6 +125,7 @@ export async function generateAreWeThereYet(
 	ctx: ExtensionContext,
 	llmConfig: LLMConfig,
 	evalHistory: EvalMemory[] = [],
+	busSignals?: string,
 ): Promise<AWTYResult> {
 	const model = ctx.modelRegistry.find(llmConfig.provider, llmConfig.model);
 	if (!model) throw new Error(`Model not found: ${llmConfig.provider}/${llmConfig.model}`);
@@ -156,6 +157,10 @@ Progressive guidance:
 		: round <= 10 ? "\nNote: Agent has made multiple attempts. If the same issues persist, suggest a COMPLETELY DIFFERENT approach. Don't repeat previous advice."
 		: "\nNote: This is a long-running task. Break remaining work into the smallest possible independent pieces. Prioritize ruthlessly.";
 
+	const signalSection = busSignals && busSignals !== "(no events)"
+		? `\n\n=== Real-time Events (from event bus, last 5 min) ===\n${busSignals}\n\nIf you see repeated isolation:blocked or agent:error events, that means the agent is STUCK on infrastructure — not a code problem. The fix should address the tooling issue (e.g., "fix isolation config", "disable isolation", "check API key"), not tell the agent to try harder.`
+		: "";
+
 	const evalPrompt = `Here is the full conversation between the user and a coding agent:
 
 ---
@@ -166,8 +171,7 @@ Here are the current contents of the files that were touched during the conversa
 
 ---
 ${fileSnapshot.slice(0, 12000)}
----
-${historySection}
+---${historySection}${signalSection}
 Evaluate: has the original goal been fully achieved? (round ${round})
 ${steerNote}
 The file contents above are what is ACTUALLY on disk right now.
