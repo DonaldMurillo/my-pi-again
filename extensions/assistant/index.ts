@@ -674,9 +674,13 @@ export default function (pi: ExtensionAPI) {
 		description: "/assistant (open modal) | /assistant activate | /assistant deactivate",
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
-			const state = getState();
+			const state = _state;
+			if (!state) {
+				ctx.ui.notify("Assistant not initialized. Start a session first.", "error");
+				return;
+			}
 
-			if (sub === "activate") {
+			if (sub === "activate" || sub === "on") {
 				if (state.activated) {
 					ctx.ui.notify("Assistant already active. Use /assistant to open.", "info");
 					return;
@@ -688,8 +692,11 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (sub === "deactivate") {
+			if (sub === "deactivate" || sub === "off") {
 				state.activated = false;
+				state.evalHistory = [];
+				state.repromptCount = 0;
+				resetSignals();
 				persistState(state, ctx.cwd);
 				clearStatusLine(ctx);
 				ctx.ui.notify("Assistant deactivated.", "info");
