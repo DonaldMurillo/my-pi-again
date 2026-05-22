@@ -33,7 +33,7 @@ import {
 	mkdirSync, rmSync, readdirSync,
 } from "node:fs";
 import { buildSkillMap, resolveChain, resolveAll } from "../../extensions/skill-chain/resolver";
-import { scorePipeline, formatScore, type ScoreConfig } from "./scoring";
+import { checkPipeline, formatReport, type CheckConfig } from "./scoring";
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
@@ -509,15 +509,14 @@ describe("E2E: GLM baseline (no pipeline)", { timeout: 3_600_000, sequential: tr
 				if (!testOk) console.log("test output:", testOutput.slice(-500));
 			}
 
-			// Score the baseline output
-			const baselineScore = await scorePipeline(dir, { runBuild: false });
-			console.log(formatScore(baselineScore));
+			// Check the baseline output
+			const baselineReport = await checkPipeline(dir, { runBuild: false });
+			console.log(formatReport(baselineReport));
 
-			// Log summary for comparison (don't assert — this is a control group)
+			// Log summary
 			console.log(`\n=== BASELINE SUMMARY ===`);
 			console.log(`Response: ${text.length} chars`);
-			console.log(`Score: ${baselineScore.grade} (${(baselineScore.total / baselineScore.maxTotal * 100).toFixed(0)}%)`);
-			console.log(baselineScore.summary);
+			console.log(`Checklist: ${baselineReport.passed}/${baselineReport.total}`);
 
 		} finally {
 			client.kill();
@@ -756,12 +755,12 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			console.log(`\n=== SUMMARY: ${existingCount}/${allPlanFiles.length} plan artifacts found ===`);
 
 			// ════════════════════════════════════════════
-			// Scorecard (deterministic + LLM judge)
+			// Checklist (deterministic + LLM judge)
 			// ════════════════════════════════════════════
-			const pipelineScore = await scorePipeline(dir, {
+			const pipelineReport = await checkPipeline(dir, {
 				llmJudge: { model: MODEL, timeoutMs: 120_000 },
 			});
-			console.log(formatScore(pipelineScore));
+			console.log(formatReport(pipelineReport));
 
 		} finally {
 			client.kill();
