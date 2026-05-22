@@ -1,12 +1,10 @@
 /**
  * Pipeline Eval Checklist
  *
- * Flat battery of yes/no checks. Both deterministic (file checks, regex)
- * and non-deterministic (LLM judge). No weights, no grades — just a list
- * of what passed and what didn't.
+ * Hard checks that catch real quality gaps, not just file existence.
+ * Designed to fail on mediocre output so we can iterate.
  *
- * Usage:
- *   checkPipeline(dir) → { checks: Check[], passed: number, total: number }
+ * Both deterministic (regex, structure) and non-deterministic (LLM judge).
  */
 
 import {
@@ -61,8 +59,15 @@ export async function checkPipeline(
 	const slugDir = join(dir, "docs", "plans", cfg.slug);
 	const checks: Check[] = [];
 
-	// ── Plan Artifacts ──
-	const planFiles = {
+	const D = (id: string, category: string, desc: string, passed: boolean, details: string): Check => ({
+		id, category, description: desc, passed, details, method: "deterministic" as const,
+	});
+
+	// ════════════════════════════════════════════
+	// PLAN ARTIFACTS — does each file exist?
+	// ════════════════════════════════════════════
+
+	const planFiles: Record<string, string> = {
 		"invariants.md": "invariants.md",
 		"meta.md": "meta.md",
 		"prompt.md": "prompt.md",
@@ -79,16 +84,8 @@ export async function checkPipeline(
 		"doc-manifest.md": "complete/doc-manifest.md",
 	};
 	for (const [label, path] of Object.entries(planFiles)) {
-		const full = join(slugDir, ...path.split("/"));
-		const content = tryRead(full);
-		checks.push({
-			id: `plan-exists:${label}`,
-			category: "Plan Artifacts",
-			description: `${label} exists with content`,
-			passed: !!content && content.length > 20,
-			details: content ? `${content.length} chars` : "missing",
-			method: "deterministic",
-		});
+		const c = tryRead(join(slugDir, ...path.split("/")));
+		checks.push(D(`plan-exists:${label}`, "Plan Artifacts", `${label} exists`, !!c && c.length > 20, c ? `${c.length} chars` : "missing"));
 	}
 
 	// Research files
@@ -98,331 +95,221 @@ export async function checkPipeline(
 		"research-patterns.md", "research-web.md",
 	];
 	for (const f of researchFiles) {
-		const content = tryRead(join(slugDir, "research", f));
-		checks.push({
-			id: `research-exists:${f}`,
-			category: "Research",
-			description: `research/${f} exists`,
-			passed: !!content && content.length > 20,
-			details: content ? `${content.length} chars` : "missing",
-			method: "deterministic",
-		});
+		const c = tryRead(join(slugDir, "research", f));
+		checks.push(D(`research-exists:${f}`, "Research", `research/${f} exists`, !!c && c.length > 20, c ? `${c.length} chars` : "missing"));
 	}
 
 	// Critique files
 	const critiqueFiles = ["critique-swe.md", "critique-security.md", "critique-perf.md", "critique-ux.md"];
 	for (const f of critiqueFiles) {
-		const content = tryRead(join(slugDir, "critiques", f));
-		checks.push({
-			id: `critique-exists:${f}`,
-			category: "Critiques",
-			description: `critiques/${f} exists`,
-			passed: !!content && content.length > 20,
-			details: content ? `${content.length} chars` : "missing",
-			method: "deterministic",
-		});
+		const c = tryRead(join(slugDir, "critiques", f));
+		checks.push(D(`critique-exists:${f}`, "Critiques", `critiques/${f} exists`, !!c && c.length > 20, c ? `${c.length} chars` : "missing"));
 	}
 
-	// ── Plan Content ──
+	// ════════════════════════════════════════════
+	// META — is it the right format?
+	// ════════════════════════════════════════════
 
 	const meta = tryRead(join(slugDir, "meta.md")) ?? "";
-	checks.push({
-		id: "meta-has-phase-table",
-		category: "Plan Content",
-		description: "meta.md has phase tracking table",
-		passed: /Phase.*Status|Status.*Phase/i.test(meta),
-		details: /Phase.*Status|Status.*Phase/i.test(meta) ? "found phase table" : "no phase table found",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "meta-has-slug",
-		category: "Plan Content",
-		description: "meta.md has slug",
-		passed: /slug/i.test(meta),
-		details: /slug/i.test(meta) ? "found slug" : "no slug",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "meta-has-user-prompt",
-		category: "Plan Content",
-		description: "meta.md has user prompt",
-		passed: /User Prompt|user prompt/i.test(meta),
-		details: /User Prompt|user prompt/i.test(meta) ? "found user prompt" : "no user prompt",
-		method: "deterministic",
-	});
+	checks.push(D("meta-has-phase-table", "Meta", "meta.md has phase tracking table", /Phase.*Status|Status.*Phase/i.test(meta), /Phase/i.test(meta) ? "found" : "no phase table"));
+	checks.push(D("meta-has-slug", "Meta", "meta.md has slug field", /slug/i.test(meta), /slug/i.test(meta) ? "found" : "missing"));
+	checks.push(D("meta-has-task-description", "Meta", "meta.md quotes the original task", /mcp-discovery|MCP server/i.test(meta), /mcp-discovery|MCP server/i.test(meta) ? "found task" : "no task text"));
+	checks.push(D("meta-has-dates", "Meta", "meta.md has dates in phase table", /202[0-9]/.test(meta), /202[0-9]/.test(meta) ? "found dates" : "no dates"));
+	checks.push(D("meta-all-phases-complete", "Meta", "meta.md marks all phases completed", (() => {
+		if (!meta) return false;
+		const completes = (meta.match(/complete|✅|completed|done|pass/gi) || []).length;
+		const pendings = (meta.match(/\bpending\b|\bin.progress\b|\bin_progress\b|\bblocked\b/gi) || []).length;
+		return completes >= 5 && pendings === 0;
+	})(), (() => {
+		const completes = (meta.match(/complete|✅|completed|done|pass/gi) || []).length;
+		const pendings = (meta.match(/\bpending\b|\bin.progress\b|\bin_progress\b|\bblocked\b/gi) || []).length;
+		return `${completes} completed, ${pendings} pending`;
+	})()));
 
-	const prompt = tryRead(join(slugDir, "prompt.md")) ?? "";
-	checks.push({
-		id: "prompt-has-timestamp",
-		category: "Plan Content",
-		description: "prompt.md has timestamp",
-		passed: /timestamp/i.test(prompt),
-		details: /timestamp/i.test(prompt) ? "found timestamp" : "no timestamp",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "prompt-has-task",
-		category: "Plan Content",
-		description: "prompt.md references the task",
-		passed: /mcp-discovery|MCP/i.test(prompt),
-		details: /mcp-discovery|MCP/i.test(prompt) ? "references task" : "no task reference",
-		method: "deterministic",
-	});
+	// ════════════════════════════════════════════
+	// PROMPT — verbatim task preserved?
+	// ════════════════════════════════════════════
 
-	const initialPlan = tryRead(join(slugDir, "initial-plan.md")) ?? "";
-	for (const section of ["Goal", "Architecture", "Testing"]) {
-		checks.push({
-			id: `plan-section:${section}`,
-			category: "Plan Content",
-			description: `initial-plan.md has ${section} section`,
-			passed: new RegExp(section, "i").test(initialPlan),
-			details: new RegExp(section, "i").test(initialPlan) ? "found" : "missing",
-			method: "deterministic",
-		});
-	}
+	const promptFile = tryRead(join(slugDir, "prompt.md")) ?? "";
+	checks.push(D("prompt-has-timestamp", "Prompt", "prompt.md has timestamp", /timestamp|date|created/i.test(promptFile), /timestamp|date|created/i.test(promptFile) ? "found" : "missing"));
+	checks.push(D("prompt-has-verbatim-task", "Prompt", "prompt.md contains verbatim task text", /mcp-servers\.json/.test(promptFile), /mcp-servers\.json/.test(promptFile) ? "found exact text" : "missing"));
+	checks.push(D("prompt-not-empty", "Prompt", "prompt.md is 100+ chars", promptFile.length >= 100, `${promptFile.length} chars`));
+
+	// ════════════════════════════════════════════
+	// INITIAL PLAN — substance checks
+	// ════════════════════════════════════════════
+
+	const plan = tryRead(join(slugDir, "initial-plan.md")) ?? "";
+	checks.push(D("plan-has-goal", "Plan Substance", "initial-plan has Goal section", /^#{1,4}\s+.*Goal/mi.test(plan), /^#{1,4}\s+.*Goal/mi.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-has-architecture", "Plan Substance", "initial-plan has Architecture section", /^#{1,4}\s+.*Architecture/mi.test(plan), /^#{1,4}\s+.*Architecture/mi.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-has-testing-strategy", "Plan Substance", "initial-plan has Testing Strategy section", /testing strategy/i.test(plan), /testing strategy/i.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-has-data-model", "Plan Substance", "initial-plan has data model with types/interfaces", /interface|type.*=|data model|TypeScript types/i.test(plan), /interface|type.*=|data model|TypeScript types/i.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-has-specific-files", "Plan Substance", "initial-plan lists specific file paths (src/...)", /src\/[a-z_-]+\.(ts|tsx)/i.test(plan), /src\/[a-z_-]+\.(ts|tsx)/i.test(plan) ? "found file paths" : "no specific file paths"));
+	checks.push(D("plan-has-open-questions", "Plan Substance", "initial-plan has open questions", /open question|question/i.test(plan), /open question|question/i.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-has-key-decisions", "Plan Substance", "initial-plan has key decisions table", /decision|choice|approach/i.test(plan), /decision|choice|approach/i.test(plan) ? "found" : "missing"));
+	checks.push(D("plan-is-substantial", "Plan Substance", "initial-plan is 1500+ chars", plan.length >= 1500, `${plan.length} chars`));
+
+	// ════════════════════════════════════════════
+	// USER FLOW SPEC — completeness
+	// ════════════════════════════════════════════
 
 	const flowSpec = tryRead(join(slugDir, "user-flow-spec.md")) ?? "";
-	checks.push({
-		id: "flowspec-has-actors",
-		category: "Plan Content",
-		description: "user-flow-spec.md has actors",
-		passed: /actor/i.test(flowSpec),
-		details: /actor/i.test(flowSpec) ? "found actors" : "no actors",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "flowspec-has-flows",
-		category: "Plan Content",
-		description: "user-flow-spec.md has flows",
-		passed: /flow/i.test(flowSpec),
-		details: /flow/i.test(flowSpec) ? "found flows" : "no flows",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "flowspec-has-test-matrix",
-		category: "Plan Content",
-		description: "user-flow-spec.md has test matrix",
-		passed: /test matrix/i.test(flowSpec),
-		details: /test matrix/i.test(flowSpec) ? "found test matrix" : "no test matrix",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "flowspec-has-error-flows",
-		category: "Plan Content",
-		description: "user-flow-spec.md has error flows",
-		passed: /error flow|error case/i.test(flowSpec),
-		details: /error flow|error case/i.test(flowSpec) ? "found error flows" : "no error flows",
-		method: "deterministic",
-	});
+	checks.push(D("flowspec-has-actors", "Flow Spec", "user-flow-spec defines actors", /actor/i.test(flowSpec), /actor/i.test(flowSpec) ? "found" : "missing"));
+	checks.push(D("flowspec-has-happy-path", "Flow Spec", "user-flow-spec has happy path flows", /happy path|flow 1|flow.*1/i.test(flowSpec), /happy path|flow 1|flow.*1/i.test(flowSpec) ? "found" : "missing"));
+	checks.push(D("flowspec-has-error-flows", "Flow Spec", "user-flow-spec has error flows", /error flow|error case|error.*flow/i.test(flowSpec), /error flow|error case|error.*flow/i.test(flowSpec) ? "found" : "missing"));
+	checks.push(D("flowspec-has-test-matrix", "Flow Spec", "user-flow-spec has test matrix", /test matrix/i.test(flowSpec), /test matrix/i.test(flowSpec) ? "found" : "missing"));
+	checks.push(D("flowspec-has-edge-cases", "Flow Spec", "user-flow-spec lists edge cases", /edge case|boundary|edge/i.test(flowSpec), /edge case|boundary|edge/i.test(flowSpec) ? "found" : "missing"));
+	checks.push(D("flowspec-is-substantial", "Flow Spec", "user-flow-spec is 1000+ chars", flowSpec.length >= 1000, `${flowSpec.length} chars`));
 
-	// ── Critique Substance ──
+	// ════════════════════════════════════════════
+	// DEEPENED PLAN — is it actually deeper?
+	// ════════════════════════════════════════════
+
+	const deepPlan = tryRead(join(slugDir, "deepened-plan.md")) ?? "";
+	checks.push(D("deep-has-function-signatures", "Deepened Plan", "deepened-plan has function signatures", /function\s+\w+\s*\(|=>\s*{|export function/i.test(deepPlan), /function\s+\w+\s*\(/i.test(deepPlan) ? "found signatures" : "no function signatures"));
+	checks.push(D("deep-has-error-handling", "Deepened Plan", "deepened-plan covers error handling", /error handling|error.*case|try.*catch|throw/i.test(deepPlan), /error handling|error.*case|try.*catch|throw/i.test(deepPlan) ? "found" : "missing"));
+	checks.push(D("deep-has-implementation-order", "Deepened Plan", "deepened-plan has implementation order", /implementation order|order.*implement|build order/i.test(deepPlan), /implementation order|order.*implement|build order/i.test(deepPlan) ? "found" : "missing"));
+	checks.push(D("deep-different-from-initial", "Deepened Plan", "deepened-plan is not a copy of initial-plan", deepPlan !== plan && deepPlan.length > 100, deepPlan === plan ? "identical to initial-plan!" : `${deepPlan.length} chars, different content`));
+
+	// ════════════════════════════════════════════
+	// CRITIQUES — are they real or generic?
+	// ════════════════════════════════════════════
 
 	for (const f of critiqueFiles) {
-		const content = tryRead(join(slugDir, "critiques", f)) ?? "";
-		const severityCount = (content.match(/High|Medium|Low/gi) || []).length;
-		checks.push({
-			id: `critique-depth:${f}`,
-			category: "Critique Substance",
-			description: `${f} has 5+ severity-tagged concerns`,
-			passed: severityCount >= 5,
-			details: `${severityCount} severity items`,
-			method: "deterministic",
-		});
+		const c = tryRead(join(slugDir, "critiques", f)) ?? "";
+		const severityCount = (c.match(/High|Medium|Low/gi) || []).length;
+		checks.push(D(`critique-depth:${f}`, "Critique Depth", `${f} has 5+ severity-tagged concerns`, severityCount >= 5, `${severityCount} severity items`));
 	}
 
-	// ── Q&A Quality ──
+	// Check if any critique quotes specific plan text
+	for (const f of critiqueFiles) {
+		const c = tryRead(join(slugDir, "critiques", f)) ?? "";
+		const quotesSpecific = /deepened-plan|initial-plan|the plan|section|specifically|line \d+|function \w+|config\.ts|search\.ts|index\.ts/i.test(c);
+		checks.push(D(`critique-specific:${f}`, "Critique Specificity", `${f} references specific plan text`, quotesSpecific, quotesSpecific ? "found specific refs" : "generic advice only"));
+	}
+
+	// At least one critique has a "Missing from plan" section
+	const anyMissingFromPlan = critiqueFiles.some(f => {
+		const c = tryRead(join(slugDir, "critiques", f)) ?? "";
+		return /missing from plan|not addressed|not covered|gap|omitted|overlooked/i.test(c);
+	});
+	checks.push(D("critique-has-missing-section", "Critique Depth", "at least one critique has 'Missing from plan' section", anyMissingFromPlan, anyMissingFromPlan ? "found" : "no critique identifies gaps"));
+
+	// ════════════════════════════════════════════
+	// Q&A — are questions real trade-offs?
+	// ════════════════════════════════════════════
 
 	const questions = tryRead(join(slugDir, "questions.md")) ?? "";
-	checks.push({
-		id: "qa-has-questions",
-		category: "Q&A",
-		description: "questions.md has 3+ distinct questions",
-		passed: (questions.match(/\*\*Q\d|Q\d:/g) || []).length >= 3,
-		details: `${(questions.match(/\*\*Q\d|Q\d:/g) || []).length} questions`,
-		method: "deterministic",
-	});
-	checks.push({
-		id: "qa-has-options",
-		category: "Q&A",
-		description: "questions.md has options (A/B/C)",
-		passed: /\(A\)|Option A|\*\*A\*\*/i.test(questions),
-		details: /\(A\)|Option A|\*\*A\*\*/i.test(questions) ? "found options" : "no options",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "qa-has-rationale",
-		category: "Q&A",
-		description: "questions.md has rationale/confidence",
-		passed: /rationale|confidence|high confidence/i.test(questions),
-		details: /rationale|confidence|high confidence/i.test(questions) ? "found" : "missing",
-		method: "deterministic",
-	});
+	checks.push(D("qa-has-3-plus-questions", "Q&A", "questions.md has 3+ distinct questions", (questions.match(/\*\*Q\d|Q\d:/g) || []).length >= 3, `${(questions.match(/\*\*Q\d|Q\d:/g) || []).length} questions`));
+	checks.push(D("qa-has-options", "Q&A", "questions have options A/B", /\(A\)|Option A|\*\*A\*\*/i.test(questions), /\(A\)|Option A/i.test(questions) ? "found" : "missing"));
+	checks.push(D("qa-has-decisions", "Q&A", "questions have decisions (AUTO-RESOLVED, SELECTED, ACCEPTED)", /AUTO-RESOLVED|SELECTED|ACCEPTED|REJECTED|CHOSEN|Decision:/i.test(questions), /AUTO-RESOLVED|SELECTED|ACCEPTED|REJECTED|Decision:/i.test(questions) ? "found" : "missing"));
+	checks.push(D("qa-has-source-references", "Q&A", "questions cite their source (which critique raised them)", /Source:|source:/i.test(questions), /Source:|source:/i.test(questions) ? "found" : "missing"));
+	checks.push(D("qa-has-confidence", "Q&A", "at least one resolution has confidence level", /confidence/i.test(questions), /confidence/i.test(questions) ? "found" : "missing"));
 
-	// ── Code ──
+	// ════════════════════════════════════════════
+	// FINAL PLAN — does it incorporate critiques?
+	// ════════════════════════════════════════════
+
+	const finalPlan = tryRead(join(slugDir, "final-plan.md")) ?? "";
+	checks.push(D("final-has-qa-resolutions", "Final Plan", "final-plan references Q&A resolutions", /Q&A|resolution|auto-resolve|decision/i.test(finalPlan), /Q&A|resolution|auto-resolve|decision/i.test(finalPlan) ? "found" : "missing"));
+	checks.push(D("final-has-architecture", "Final Plan", "final-plan has architecture section", /architecture|system design/i.test(finalPlan), /architecture|system design/i.test(finalPlan) ? "found" : "missing"));
+	checks.push(D("final-has-file-list", "Final Plan", "final-plan lists new/modified files", /new file|modified file|files.*create|create.*file/i.test(finalPlan), /new file|modified file|files.*create|create.*file/i.test(finalPlan) ? "found" : "missing"));
+	checks.push(D("final-has-implementation-order", "Final Plan", "final-plan has implementation order", /implementation order|order|step 1|phase 1/i.test(finalPlan), /implementation order|order|step 1|phase 1/i.test(finalPlan) ? "found" : "missing"));
+	checks.push(D("final-different-from-initial", "Final Plan", "final-plan differs from initial-plan", finalPlan !== plan && finalPlan.length > 100, finalPlan === plan ? "identical!" : `${finalPlan.length} chars, different`));
+
+	// ════════════════════════════════════════════
+	// EXECUTION — task breakdown & log
+	// ════════════════════════════════════════════
+
+	const taskBreakdown = tryRead(join(slugDir, "execution", "task-breakdown.md")) ?? "";
+	checks.push(D("exec-has-dependency-graph", "Execution", "task-breakdown has dependency graph or batch structure", /batch|dependency|depends on|→|graph|parallel|sequential/i.test(taskBreakdown), /batch|dependency|depends on/i.test(taskBreakdown) ? "found" : "missing"));
+	checks.push(D("exec-has-task-details", "Execution", "task-breakdown has file assignments per task", /file|src\/|\.ts/i.test(taskBreakdown), /file|src\/|\.ts/i.test(taskBreakdown) ? "found" : "missing"));
+
+	const taskLog = tryRead(join(slugDir, "execution", "task-log.md")) ?? "";
+	checks.push(D("exec-log-has-table", "Execution", "task-log has status table", /\|.*status|\|.*done|\|.*pass/i.test(taskLog), /\|.*status|\|.*done/i.test(taskLog) ? "found table" : "no table"));
+	checks.push(D("exec-log-has-real-status", "Execution", "task-log shows pass/fail lint results", /pass|fail/i.test(taskLog), /pass|fail/i.test(taskLog) ? "found" : "missing"));
+	checks.push(D("exec-log-has-verification", "Execution", "task-log has verification section (tsc/vitest output)", /tsc|vitest|verification|typecheck/i.test(taskLog), /tsc|vitest|verification|typecheck/i.test(taskLog) ? "found" : "missing"));
+
+	// ════════════════════════════════════════════
+	// CODE — existence + quality
+	// ════════════════════════════════════════════
 
 	for (const f of cfg.expectedSrcFiles) {
-		const content = tryRead(join(dir, f));
-		checks.push({
-			id: `code-exists:${f}`,
-			category: "Code",
-			description: `${f} exists with 50+ chars`,
-			passed: !!content && content.length > 50,
-			details: content ? `${content.length} chars` : "missing",
-			method: "deterministic",
-		});
+		const c = tryRead(join(dir, f));
+		checks.push(D(`code-exists:${f}`, "Code Existence", `${f} exists with 50+ chars`, !!c && c.length > 50, c ? `${c.length} chars` : "missing"));
 	}
 
 	const types = tryRead(join(dir, "src/types.ts")) ?? "";
-	checks.push({
-		id: "code-has-interfaces",
-		category: "Code Quality",
-		description: "types.ts exports 3+ interfaces",
-		passed: (types.match(/export interface/g) || []).length >= 3,
-		details: `${(types.match(/export interface/g) || []).length} interfaces`,
-		method: "deterministic",
-	});
+	checks.push(D("code-types-interfaces", "Code Quality", "types.ts exports 3+ interfaces", (types.match(/export interface/g) || []).length >= 3, `${(types.match(/export interface/g) || []).length} interfaces`));
+	checks.push(D("code-types-mcp-config", "Code Quality", "types.ts defines MCPServerConfig", /MCPServerConfig|MCP.*Config/i.test(types), /MCPServerConfig|MCP.*Config/i.test(types) ? "found" : "missing"));
+	checks.push(D("code-types-mcp-tool", "Code Quality", "types.ts defines MCPTool or Tool type", /MCPTool|Tool\s*\{/i.test(types), /MCPTool|Tool\s*\{/i.test(types) ? "found" : "missing"));
 
 	const search = tryRead(join(dir, "src/search.ts")) ?? "";
-	checks.push({
-		id: "code-has-pure-functions",
-		category: "Code Quality",
-		description: "search.ts exports 3+ functions",
-		passed: (search.match(/export function/g) || []).length >= 3,
-		details: `${(search.match(/export function/g) || []).length} exported functions`,
-		method: "deterministic",
-	});
-	checks.push({
-		id: "code-search-is-pure",
-		category: "Code Quality",
-		description: "search.ts has no I/O imports (pure)",
-		passed: !search || !/import.*fs|import.*http|import.*fetch/.test(search),
-		details: /import.*fs|import.*http|import.*fetch/.test(search) ? "has I/O imports" : "pure",
-		method: "deterministic",
-	});
+	checks.push(D("code-search-pure-functions", "Code Quality", "search.ts exports 3+ functions", (search.match(/export function/g) || []).length >= 3, `${(search.match(/export function/g) || []).length} functions`));
+	checks.push(D("code-search-no-io", "Code Quality", "search.ts has no fs/http/fetch imports", !search || !/import.*\bfs\b|import.*http|import.*fetch/.test(search), /import.*\bfs\b|import.*http|import.*fetch/.test(search) ? "has I/O" : "pure"));
+	checks.push(D("code-search-has-scoring", "Code Quality", "search.ts implements relevance scoring", /score|rank|relevance|weight/i.test(search), /score|rank|relevance|weight/i.test(search) ? "found" : "missing"));
 
 	const index = tryRead(join(dir, "src/index.ts")) ?? "";
-	checks.push({
-		id: "code-has-default-export",
-		category: "Code Quality",
-		description: "index.ts exports default function",
-		passed: /export default function/i.test(index),
-		details: /export default function/i.test(index) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "code-registers-tools",
-		category: "Code Quality",
-		description: "index.ts registers tools (registerTool)",
-		passed: /registerTool|pi\.register/i.test(index),
-		details: /registerTool|pi\.register/i.test(index) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "code-has-search-mcp-tools",
-		category: "Code Quality",
-		description: "code references search_mcp_tools or list_mcp_servers",
-		passed: /search_mcp_tools|list_mcp_servers/.test(index),
-		details: /search_mcp_tools|list_mcp_servers/.test(index) ? "found" : "missing",
-		method: "deterministic",
-	});
+	checks.push(D("code-index-default-export", "Code Quality", "index.ts exports default function", /export default function/i.test(index), /export default function/i.test(index) ? "found" : "missing"));
+	checks.push(D("code-index-register-tool", "Code Quality", "index.ts registers search_mcp_tools tool", /search_mcp_tools/.test(index), /search_mcp_tools/.test(index) ? "found" : "missing"));
+	checks.push(D("code-index-register-list", "Code Quality", "index.ts registers list_mcp_servers tool", /list_mcp_servers/.test(index), /list_mcp_servers/.test(index) ? "found" : "missing"));
+	checks.push(D("code-index-has-command", "Code Quality", "index.ts registers /mcp command", /registerCommand.*mcp|command.*mcp/i.test(index), /registerCommand.*mcp|command.*mcp/i.test(index) ? "found" : "missing"));
+	checks.push(D("code-no-any-types", "Code Quality", "no `any` types in index.ts", !/: any\b/.test(index), /: any\b/.test(index) ? "found any types" : "clean"));
 
 	const testFile = tryRead(join(dir, "src/search.test.ts")) ?? "";
-	checks.push({
-		id: "code-has-tests",
-		category: "Code Quality",
-		description: "search.test.ts has 10+ test cases",
-		passed: (testFile.match(/\bit\(/g) || []).length >= 10,
-		details: `${(testFile.match(/\bit\(/g) || []).length} test cases`,
-		method: "deterministic",
-	});
-	checks.push({
-		id: "code-tests-edge-cases",
-		category: "Code Quality",
-		description: "tests cover edge cases (empty, null, invalid)",
-		passed: /empty|null|invalid|edge|boundary|case/i.test(testFile),
-		details: /empty|null|invalid|edge|boundary|case/i.test(testFile) ? "found edge case tests" : "no edge case tests",
-		method: "deterministic",
-	});
+	checks.push(D("code-test-count", "Test Quality", "search.test.ts has 10+ test cases", (testFile.match(/\bit\(/g) || []).length >= 10, `${(testFile.match(/\bit\(/g) || []).length} test cases`));
+	checks.push(D("code-test-describe-blocks", "Test Quality", "tests have describe blocks grouping by function", (testFile.match(/describe\(/g) || []).length >= 3, `${(testFile.match(/describe\(/g) || []).length} describe blocks`));
+	checks.push(D("code-test-edge-cases", "Test Quality", "tests cover edge cases (empty, null, special chars)", /empty|null|undefined|special char|boundary/i.test(testFile), /empty|null|undefined|special char|boundary/i.test(testFile) ? "found" : "missing"));
+	checks.push(D("code-test-scoring", "Test Quality", "tests verify scoring/relevance ordering", /score|rank|relevance|ordering|sorted|descending/i.test(testFile), /score|rank|relevance|ordering|sorted|descending/i.test(testFile) ? "found" : "missing"));
+	checks.push(D("code-test-multi-word", "Test Quality", "tests cover multi-word queries", /multi.?word|two word|multiple word|split.*query/i.test(testFile), /multi.?word|two word|multiple word/i.test(testFile) ? "found" : "missing"));
 
-	// ── Build ──
+	// ════════════════════════════════════════════
+	// BUILD — compile + test
+	// ════════════════════════════════════════════
 
 	if (cfg.runBuild && existsSync(join(dir, "src", "index.ts"))) {
-		const buildResult = await runBuild(dir);
-		checks.push({
-			id: "build-tsc",
-			category: "Build",
-			description: "tsc --noEmit passes with 0 errors",
-			passed: buildResult.tscExit === 0,
-			details: buildResult.tscExit === 0 ? "0 errors" : `exit ${buildResult.tscExit}: ${buildResult.tscError.slice(0, 200)}`,
-			method: "deterministic",
-		});
-		checks.push({
-			id: "build-vitest",
-			category: "Build",
-			description: "vitest run passes with 0 failures",
-			passed: buildResult.testExit === 0,
-			details: buildResult.testExit === 0 ? "all tests pass" : `exit ${buildResult.testExit}: ${buildResult.testOutput.slice(0, 200)}`,
-			method: "deterministic",
-		});
+		const build = await runBuild(dir);
+		checks.push(D("build-tsc", "Build", "tsc --noEmit passes", build.tscExit === 0, build.tscExit === 0 ? "0 errors" : `exit ${build.tscExit}`));
+		checks.push(D("build-vitest", "Build", "vitest run passes", build.testExit === 0, build.testExit === 0 ? "all pass" : `exit ${build.testExit}`));
 	}
 
-	// ── Review Honesty ──
+	// ════════════════════════════════════════════
+	// REVIEW — honest or theater?
+	// ════════════════════════════════════════════
 
 	const review = tryRead(join(slugDir, "review", "test-results.md")) ?? "";
-	checks.push({
-		id: "review-has-meets-standards",
-		category: "Review",
-		description: "review has Meets Standards verdict",
-		passed: /meets standards/i.test(review),
-		details: /meets standards/i.test(review) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "review-has-pass-fail",
-		category: "Review",
-		description: "review has pass/fail counts",
-		passed: /passed|failed|PASS|FAIL/i.test(review),
-		details: /passed|failed|PASS|FAIL/i.test(review) ? "found" : "missing",
-		method: "deterministic",
-	});
+	checks.push(D("review-has-verdict", "Review", "review has verdict (Meets Standards / PASS)", /meets standards|result:\s*pass|verdict:\s*pass/i.test(review), /meets standards|result:\s*pass|verdict:\s*pass/i.test(review) ? "found" : "missing"));
+	checks.push(D("review-has-pass-fail", "Review", "review shows pass/fail counts", /\d+\s*(pass|fail|test)/i.test(review), /\d+\s*(pass|fail|test)/i.test(review) ? "found" : "missing"));
+	checks.push(D("review-has-tsc-output", "Review", "review shows tsc compilation result", /tsc|typescript|0 error|compilation/i.test(review), /tsc|typescript|0 error|compilation/i.test(review) ? "found" : "missing"));
+	checks.push(D("review-is-substantial", "Review", "review is 500+ chars (not a one-liner)", review.length >= 500, `${review.length} chars`));
 
-	// ── Insights ──
+	// ════════════════════════════════════════════
+	// INSIGHTS — real learnings?
+	// ════════════════════════════════════════════
 
 	const insights = tryRead(join(slugDir, "insights.md")) ?? "";
-	checks.push({
-		id: "insights-has-research-highlights",
-		category: "Insights",
-		description: "insights.md has research highlights",
-		passed: /research|web|highlight/i.test(insights),
-		details: /research|web|highlight/i.test(insights) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "insights-has-tradeoffs",
-		category: "Insights",
-		description: "insights.md has trade-off decisions",
-		passed: /trade.?off|decision|rationale/i.test(insights),
-		details: /trade.?off|decision|rationale/i.test(insights) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "insights-has-patterns",
-		category: "Insights",
-		description: "insights.md has patterns discovered",
-		passed: /pattern|discover/i.test(insights),
-		details: /pattern|discover/i.test(insights) ? "found" : "missing",
-		method: "deterministic",
-	});
-	checks.push({
-		id: "insights-has-process-improvements",
-		category: "Insights",
-		description: "insights.md has process improvements",
-		passed: /improvement|process|next time/i.test(insights),
-		details: /improvement|process|next time/i.test(insights) ? "found" : "missing",
-		method: "deterministic",
-	});
+	checks.push(D("insights-research-highlights", "Insights", "insights has research highlights", /research|web|highlight/i.test(insights), /research|web|highlight/i.test(insights) ? "found" : "missing"));
+	checks.push(D("insights-tradeoffs", "Insights", "insights has trade-off decisions", /trade.?off|decision|rationale/i.test(insights), /trade.?off|decision|rationale/i.test(insights) ? "found" : "missing"));
+	checks.push(D("insights-patterns", "Insights", "insights has patterns discovered", /pattern|discover/i.test(insights), /pattern|discover/i.test(insights) ? "found" : "missing"));
+	checks.push(D("insights-improvements", "Insights", "insights has process improvements", /improvement|process|next time|better/i.test(insights), /improvement|process|next time|better/i.test(insights) ? "found" : "missing"));
+	checks.push(D("insights-is-substantial", "Insights", "insights is 1000+ chars", insights.length >= 1000, `${insights.length} chars`));
 
-	// ── LLM Judge ──
+	// ════════════════════════════════════════════
+	// COMPLETION — commit plan + doc manifest
+	// ════════════════════════════════════════════
+
+	const commitPlan = tryRead(join(slugDir, "complete", "commit-plan.md")) ?? "";
+	checks.push(D("commit-plan-exists", "Completion", "commit-plan.md exists", commitPlan.length > 20, `${commitPlan.length} chars`));
+	checks.push(D("commit-plan-has-messages", "Completion", "commit-plan has commit messages", /commit|message/i.test(commitPlan), /commit|message/i.test(commitPlan) ? "found" : "missing"));
+	checks.push(D("commit-plan-has-files", "Completion", "commit-plan lists files per commit", /\.ts|\.tsx|\.json/i.test(commitPlan), /\.ts|\.tsx|\.json/i.test(commitPlan) ? "found" : "missing"));
+
+	const docManifest = tryRead(join(slugDir, "complete", "doc-manifest.md")) ?? "";
+	checks.push(D("doc-manifest-exists", "Completion", "doc-manifest.md exists", docManifest.length > 20, `${docManifest.length} chars`));
+	checks.push(D("doc-manifest-has-changes", "Completion", "doc-manifest lists changed files", /file|update|create|change/i.test(docManifest), /file|update|create|change/i.test(docManifest) ? "found" : "missing"));
+
+	// ════════════════════════════════════════════
+	// LLM JUDGE — non-deterministic quality eval
+	// ════════════════════════════════════════════
 
 	if (cfg.llmJudge) {
 		const llmChecks = await runLLMJudge(slugDir, dir, cfg.llmJudge);
@@ -476,7 +363,6 @@ async function runLLMJudge(
 	const model = judgeCfg.model ?? "zai/glm-5.1";
 	const timeoutMs = judgeCfg.timeoutMs ?? 120_000;
 
-	// Gather artifacts
 	const artifacts: Record<string, string> = {};
 	const planArtifacts: Record<string, string> = {
 		"initial-plan": "initial-plan.md",
@@ -495,34 +381,28 @@ async function runLLMJudge(
 	}
 
 	if (Object.keys(artifacts).length === 0) {
-		return [{
-			id: "llm-no-artifacts",
-			category: "LLM Judge",
-			description: "LLM judge had artifacts to evaluate",
-			passed: false,
-			details: "No artifacts found",
-			method: "llm",
-		}];
+		return [{ id: "llm-no-artifacts", category: "LLM Judge", description: "LLM judge had artifacts to evaluate", passed: false, details: "No artifacts found", method: "llm" }];
 	}
 
-	const artifactBlock = Object.entries(artifacts)
-		.map(([k, v]) => `## ${k}\n${v}`)
-		.join("\n\n");
+	const artifactBlock = Object.entries(artifacts).map(([k, v]) => `## ${k}\n${v}`).join("\n\n");
 
-	const prompt = `You are reviewing a planning + implementation pipeline output.
-For each question below, answer YES or NO with a brief reason.
-Reply with ONLY a JSON object with these exact keys, each true or false:
+	const prompt = `You are a senior engineering manager reviewing a planning + implementation pipeline output.
+For each question, answer YES or NO. Reply with ONLY a JSON object with these exact boolean keys:
 
 {
   "plan_has_real_architecture": true/false,
   "plan_has_specific_files_listed": true/false,
-  "plan_has_data_model": true/false,
+  "plan_has_data_model_with_types": true/false,
+  "plan_has_concrete_testing_strategy": true/false,
   "critiques_reference_specific_plan_text": true/false,
   "critiques_have_actionable_fixes": true/false,
+  "critiques_caught_real_issues": true/false,
   "code_matches_plan_file_structure": true/false,
   "code_matches_plan_interfaces": true/false,
   "tests_are_meaningful_not_trivial": true/false,
   "tests_cover_error_cases": true/false,
+  "tests_verify_scoring_behavior": true/false,
+  "insights_have_specific_findings": true/false,
   "overall_would_you_merge_this": true/false,
   "reasoning": "brief explanation"
 }
@@ -531,20 +411,23 @@ Reply with ONLY a JSON object with these exact keys, each true or false:
 
 ${artifactBlock}`;
 
-	// Call LLM
 	const result = await callLLMJudge(prompt, model, timeoutMs);
-
 	const checks: Check[] = [];
+
 	const keys = [
 		"plan_has_real_architecture",
 		"plan_has_specific_files_listed",
-		"plan_has_data_model",
+		"plan_has_data_model_with_types",
+		"plan_has_concrete_testing_strategy",
 		"critiques_reference_specific_plan_text",
 		"critiques_have_actionable_fixes",
+		"critiques_caught_real_issues",
 		"code_matches_plan_file_structure",
 		"code_matches_plan_interfaces",
 		"tests_are_meaningful_not_trivial",
 		"tests_cover_error_cases",
+		"tests_verify_scoring_behavior",
+		"insights_have_specific_findings",
 		"overall_would_you_merge_this",
 	];
 
@@ -555,34 +438,21 @@ ${artifactBlock}`;
 			category: "LLM Judge",
 			description: key.replace(/_/g, " "),
 			passed: val === true,
-			details: typeof val === "boolean" ? (val ? "YES" : "NO") : `no answer (${typeof val})`,
+			details: typeof val === "boolean" ? (val ? "YES" : "NO") : `no answer`,
 			method: "llm",
 		});
 	}
 
 	if (result.reasoning) {
-		checks.push({
-			id: "llm:reasoning",
-			category: "LLM Judge",
-			description: "LLM provided reasoning",
-			passed: true,
-			details: result.reasoning.slice(0, 200),
-			method: "llm",
-		});
+		checks.push({ id: "llm:reasoning", category: "LLM Judge", description: "LLM provided reasoning", passed: true, details: (result.reasoning as string).slice(0, 200), method: "llm" });
 	}
 
 	return checks;
 }
 
-interface LLMJudgeResult {
-	[key: string]: boolean | string;
-}
+interface LLMJudgeResult { [key: string]: boolean | string; }
 
-async function callLLMJudge(
-	prompt: string,
-	model: string,
-	timeoutMs: number,
-): Promise<LLMJudgeResult> {
+async function callLLMJudge(prompt: string, model: string, timeoutMs: number): Promise<LLMJudgeResult> {
 	const tmpDir = join(process.cwd(), ".tmp", "llm-judge");
 	const { mkdirSync, writeFileSync } = require("node:fs");
 	mkdirSync(tmpDir, { recursive: true });
@@ -596,10 +466,7 @@ async function callLLMJudge(
 		proc.stdout!.on("data", (d: Buffer) => { buffer += d.toString(); });
 		proc.stdin!.write(JSON.stringify({ type: "prompt", message: prompt }) + "\n");
 
-		const timeout = setTimeout(() => {
-			proc.kill();
-			resolve({});
-		}, timeoutMs);
+		const timeout = setTimeout(() => { proc.kill(); resolve({}); }, timeoutMs);
 
 		const check = setInterval(() => {
 			if (buffer.includes('"type":"agent_end"') || buffer.includes('"type": "agent_end"')) {
@@ -615,13 +482,11 @@ async function callLLMJudge(
 							const msg = obj.message;
 							if (msg?.role === "assistant" && Array.isArray(msg?.content)) {
 								for (const block of msg.content) {
-									if (block.type === "text" && typeof block.text === "string") {
-										parts.push(block.text);
-									}
+									if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
 								}
 							}
 						}
-					} catch { /* not json */ }
+					} catch {}
 				}
 
 				const text = parts.join("");
@@ -632,13 +497,9 @@ async function callLLMJudge(
 					try {
 						const parsed = JSON.parse(m[0]);
 						const boolKeys = Object.values(parsed).filter(v => typeof v === "boolean").length;
-						if (boolKeys > bestKeys) {
-							bestKeys = boolKeys;
-							bestMatch = parsed;
-						}
-					} catch { /* not valid json */ }
+						if (boolKeys > bestKeys) { bestKeys = boolKeys; bestMatch = parsed; }
+					} catch {}
 				}
-
 				proc.kill();
 				resolve(bestMatch ?? {});
 			}
@@ -653,38 +514,37 @@ function tryRead(path: string): string | null {
 		if (!existsSync(path)) return null;
 		const content = readFileSync(path, "utf8");
 		return content.length > 10 ? content : null;
-	} catch {
-		return null;
-	}
+	} catch { return null; }
 }
 
 // ─── Formatting ─────────────────────────────────────────────────────
 
 export function formatReport(report: PipelineReport): string {
 	const lines: string[] = [];
-	lines.push(`\n╔══════════════════════════════════════════════════════════════╗`);
-	lines.push(`║  CHECKLIST: ${report.passed}/${report.total} passed`.padEnd(62) + `║`);
-	lines.push(`╠══════════════════════════════════════════════════════════════╣`);
+	const w = 66;
+	const bar = "═".repeat(w);
+	lines.push(`\n╔${bar}╗`);
+	lines.push(`║  CHECKLIST: ${report.passed}/${report.total} passed`.padEnd(w) + "║");
+	lines.push(`╠${bar}╣`);
 
-	let lastCategory = "";
+	let lastCat = "";
 	for (const c of report.checks) {
-		if (c.category !== lastCategory) {
-			lines.push(`║                                                              ║`);
-			lines.push(`║  ── ${c.category} ${"─".repeat(56 - c.category.length)}`.slice(0, 62) + `║`);
-			lastCategory = c.category;
+		if (c.category !== lastCat) {
+			lines.push(`║${" ".repeat(w)}║`);
+			lines.push(`║  ── ${c.category}`.padEnd(w) + "║");
+			lastCat = c.category;
 		}
 		const icon = c.passed ? "✓" : "✗";
-		const text = `${icon} ${c.description}`.slice(0, 48);
-		const detail = c.details.slice(0, 12);
-		lines.push(`║  ${text.padEnd(49)}${detail.padEnd(13)}║`);
+		const desc = `${icon} ${c.description}`.slice(0, 46);
+		const detail = c.details.slice(0, 16);
+		lines.push(`║  ${desc.padEnd(47)}${detail.padEnd(17).slice(0, 17)}║`);
 	}
 
-	lines.push(`╠══════════════════════════════════════════════════════════════╣`);
-	lines.push(`║  BY CATEGORY:`.padEnd(62) + `║`);
+	lines.push(`╠${bar}╣`);
+	lines.push(`║  BY CATEGORY:`.padEnd(w) + "║");
 	for (const [cat, { passed, total }] of Object.entries(report.byCategory)) {
-		const line = `  ${cat}: ${passed}/${total}`;
-		lines.push(`║  ${line}`.padEnd(62) + `║`);
+		lines.push(`║    ${cat}: ${passed}/${total}`.padEnd(w) + "║");
 	}
-	lines.push(`╚══════════════════════════════════════════════════════════════╝`);
+	lines.push(`╚${bar}╝`);
 	return lines.join("\n");
 }
