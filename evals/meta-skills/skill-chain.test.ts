@@ -30,7 +30,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join, resolve } from "node:path";
 import {
 	existsSync, readFileSync, writeFileSync,
-	mkdirSync, rmSync,
+	mkdirSync, rmSync, readdirSync,
 } from "node:fs";
 import { buildSkillMap, resolveChain, resolveAll } from "../../extensions/skill-chain/resolver";
 
@@ -227,11 +227,13 @@ docs/plans/${SLUG}/
   final-plan.md                 (canonical plan: summary, Q&A resolutions, architecture, data model, new files, modified files, flows, testing strategy, implementation order)
   execution/
     task-breakdown.md           (dependency graph, batch assignments, task details)
-    task-log.md                 (task status tracking table)
+    task-log.md                 (task status tracking — REAL status, not aspirational)
+  review/
+    test-results.md             (REAL output from running tsc --noEmit and vitest run)
   complete/
     commit-plan.md              (structured commit plan with files and messages)
     doc-manifest.md             (documentation changes)
-    insights.md                 (web research highlights, deferred suggestions, patterns, trade-offs)
+  insights.md                  (web research highlights, deferred suggestions, patterns, trade-offs)
 
 ## Key Rules
 
@@ -271,6 +273,36 @@ Files you MUST create with the write tool:
 - src/config.ts — config loading from .pi/mcp-servers.json
 - src/search.ts — tool search/discovery logic
 - src/search.test.ts — vitest tests for search functionality
+
+## CRITICAL: CRITIQUES MUST BE SUBSTANTIVE
+
+Each critique file MUST:
+- Reference specific sections of deepened-plan.md by name
+- List at least 5 concerns with severity (High/Medium/Low)
+- For each concern: quote the specific plan text, explain the risk, suggest a concrete fix
+- Include a "Missing from plan" section for things the plan overlooks
+
+Generic advice like "add error handling" or "consider caching" is NOT a critique.
+A real critique says: "The plan's searchTools function on line 45 of deepened-plan.md does not
+handle the case where inputSchema is undefined — this will cause a runtime TypeError when
+building the tool index. Fix: add a null guard: inputSchema ?? { type: 'object' }"
+
+## CRITICAL: REVIEW MUST ACTUALLY RUN
+
+When you reach the Review phase:
+- You MUST run "npm install" then "npx tsc --noEmit" and capture the output
+- You MUST run "npx vitest run" and capture the output
+- Write the REAL test results to the review output, not aspirational ones
+- If tests fail, fix the code and re-run until they pass
+- The task-log must show REAL pass/fail status, not fictional timestamps
+
+## CRITICAL: INSIGHTS MUST EXIST
+
+Create insights.md with:
+- Web Research Highlights: 3-5 specific findings from research with URLs/sources
+- Patterns Discovered: new patterns that emerged during implementation
+- Trade-off Decisions: key decisions with rationale (table format)
+- Process Improvements: what the pipeline could do better next time
 
 ## Implementation File Structure
 
@@ -379,6 +411,132 @@ const TASK_DESCRIPTION =
 	"all tools at startup, provides a `search_mcp_tools` tool for incremental discovery. " +
 	"Also provides `list_mcp_servers` and a `/mcp` command.";
 
+// ═══════════════════════════════════════════════════════════════════════
+// Part 2a: Baseline — GLM with NO pipeline (control)
+// ═══════════════════════════════════════════════════════════════════════
+
+describe("E2E: GLM baseline (no pipeline)", { timeout: 3_600_000, sequential: true }, () => {
+
+	it("produces working code without pipeline skills", async () => {
+		const dir = freshProject("glm-5.1-baseline");
+
+		const client = new RpcClient(dir, MODEL);
+
+		try {
+			const prompt =
+				"Implement an MCP server configuration extension for pi called 'mcp-discovery'. " +
+				"It reads MCP server configs from `.pi/mcp-servers.json` and instead of loading " +
+				"all tools at startup, provides a `search_mcp_tools` tool for incremental discovery. " +
+				"Also provides `list_mcp_servers` and a `/mcp` command. " +
+				"Write all files in src/. Tests must pass.";
+
+			const events = await client.prompt(prompt);
+			const text = client.getTextResponse(events);
+			console.log("Baseline response:", text.length, "chars");
+
+			// Check what was produced
+			const slugDir = join(dir, "docs", "plans", SLUG);
+
+			const planFiles = [
+				"meta.md", "prompt.md", "initial-plan.md", "user-flow-spec.md",
+				"deepened-plan.md", "questions.md", "final-plan.md",
+				"research/locate-codebase.md", "research/research-web.md",
+				"critiques/critique-swe.md", "execution/task-breakdown.md",
+			];
+			const srcFiles = ["src/index.ts", "src/types.ts", "src/config.ts", "src/search.ts", "src/search.test.ts"];
+
+			console.log("\n=== Baseline Plan Artifacts ===");
+			let planCount = 0;
+			for (const f of planFiles) {
+				const fullPath = join(dir, "docs", "plans", SLUG, ...f.split("/"));
+				const exists = existsSync(fullPath);
+				if (exists) {
+					const content = readFileSync(fullPath, "utf8");
+					console.log(`  FOUND: ${f} (${content.length} chars)`);
+					planCount++;
+				} else {
+					console.log(`  MISSING: ${f}`);
+				}
+			}
+			console.log(`Plan artifacts: ${planCount}/${planFiles.length}`);
+
+			console.log("\n=== Baseline Src Files ===");
+			let srcCount = 0;
+			for (const f of srcFiles) {
+				const fullPath = join(dir, f);
+				const exists = existsSync(fullPath);
+				if (exists) {
+					const content = readFileSync(fullPath, "utf8");
+					console.log(`  FOUND: ${f} (${content.length} chars)`);
+					srcCount++;
+				} else {
+					console.log(`  MISSING: ${f}`);
+				}
+			}
+			console.log(`Src files: ${srcCount}/${srcFiles.length}`);
+
+			// Check all files in project
+			console.log("\n=== All Files ===");
+			const allFiles = findFiles(dir);
+			allFiles.forEach(f => console.log(`  ${f}`));
+
+			// Try to compile
+			let tscOk = false;
+			let testOk = false;
+			if (existsSync(join(dir, "src", "index.ts"))) {
+				const installResult = spawn("npm", ["install"], { cwd: dir, stdio: "pipe" });
+				await new Promise<void>((resolve, reject) => {
+					installResult.on("close", (code) => code === 0 ? resolve() : reject(new Error(`npm install failed: ${code}`)));
+				});
+
+				const tscResult = spawn("npx", ["tsc", "--noEmit"], { cwd: dir, stdio: "pipe" });
+				let tscError = "";
+				tscResult.stderr?.on("data", (d: Buffer) => tscError += d.toString());
+				tscResult.stdout?.on("data", (d: Buffer) => tscError += d.toString());
+				const tscExit = await new Promise<number>((resolve) => tscResult.on("close", resolve));
+				tscOk = tscExit === 0;
+				console.log(`\ntsc: ${tscOk ? "PASS" : "FAIL"}`);
+				if (!tscOk) console.log("tsc errors:", tscError.slice(-500));
+
+				const testResult = spawn("npx", ["vitest", "run", "--reporter=verbose"], { cwd: dir, stdio: "pipe" });
+				let testOutput = "";
+				testResult.stdout?.on("data", (d: Buffer) => testOutput += d.toString());
+				testResult.stderr?.on("data", (d: Buffer) => testOutput += d.toString());
+				const testExit = await new Promise<number>((resolve) => testResult.on("close", resolve));
+				testOk = testExit === 0;
+				console.log(`vitest: ${testOk ? "PASS" : "FAIL"}`);
+				if (!testOk) console.log("test output:", testOutput.slice(-500));
+			}
+
+			// Log summary for comparison (don't assert — this is a control group)
+			console.log(`\n=== BASELINE SUMMARY ===`);
+			console.log(`Response: ${text.length} chars`);
+			console.log(`Plan artifacts: ${planCount}/${planFiles.length}`);
+			console.log(`Src files: ${srcCount}/${srcFiles.length}`);
+			console.log(`tsc: ${tscOk ? "PASS" : "FAIL"}`);
+			console.log(`vitest: ${testOk ? "PASS" : "FAIL"}`);
+
+		} finally {
+			client.kill();
+		}
+	});
+});
+
+function findFiles(dir: string, prefix = ""): string[] {
+	const entries = readdirSync(dir, { withFileTypes: true });
+	const files: string[] = [];
+	for (const entry of entries) {
+		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+		const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+		if (entry.isDirectory()) {
+			files.push(...findFiles(join(dir, entry.name), path));
+		} else {
+			files.push(path);
+		}
+	}
+	return files;
+}
+
 describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: true }, () => {
 
 	it("produces full pipeline artifact tree + working code", async () => {
@@ -472,8 +630,15 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 				"critique-perf.md",
 				"critique-ux.md",
 			];
+			// Critiques must be substantive (at least 5 concerns each)
 			for (const f of critiqueFiles) {
-				expect(checkFile(f, "docs", "plans", SLUG, "critiques", f)).toBe(true);
+				const fullPath = join(slugDir, "critiques", f);
+				if (existsSync(fullPath)) {
+					const content = readFileSync(fullPath, "utf8");
+					const severityCount = (content.match(/High|Medium|Low/gi) || []).length;
+					console.log(`  Critique substance: ${f} has ${severityCount} severity-tagged items`);
+					expect(severityCount, `${f} is too shallow — needs at least 5 concerns with severity`).toBeGreaterThanOrEqual(5);
+				}
 			}
 
 			// Q&A and Final Plan
@@ -485,6 +650,19 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			console.log("\n=== Execution ===");
 			expect(checkFile("task-breakdown", "docs", "plans", SLUG, "execution", "task-breakdown.md")).toBe(true);
 			expect(checkFile("task-log", "docs", "plans", SLUG, "execution", "task-log.md")).toBe(true);
+
+			// Review results must exist with real test output
+			console.log("\n=== Review Results ===");
+			expect(checkFile("test-results", "docs", "plans", SLUG, "review", "test-results.md")).toBe(true);
+			const reviewPath = join(slugDir, "review", "test-results.md");
+			if (existsSync(reviewPath)) {
+				const reviewContent = readFileSync(reviewPath, "utf8");
+				expect(reviewContent, "Review must contain real test results").toMatch(/pass|fail|PASS|FAIL/i);
+			}
+
+			// Insights must exist
+			console.log("\n=== Insights ===");
+			expect(checkFile("insights", "docs", "plans", SLUG, "insights.md")).toBe(true);
 
 			// ════════════════════════════════════════════
 			// Phase 2: Implementation Files
@@ -551,25 +729,12 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			expect(indexContent).toMatch(/search_mcp_tools|list_mcp_servers/);
 
 			// ════════════════════════════════════════════
-			// Phase 4: Completion Artifacts (best-effort)
+			// Phase 4: Completion Artifacts
 			// ════════════════════════════════════════════
-			console.log("\n=== Completion Artifacts (best-effort) ===");
+			console.log("\n=== Completion Artifacts ===");
 
-			const completionFiles = [
-				["docs", "plans", SLUG, "complete", "commit-plan.md"],
-				["docs", "plans", SLUG, "complete", "doc-manifest.md"],
-				["docs", "plans", SLUG, "insights.md"],
-			];
-
-			for (const pathParts of completionFiles) {
-				const fullPath = join(dir, ...pathParts);
-				if (existsSync(fullPath)) {
-					const content = readFileSync(fullPath, "utf8");
-					console.log(`  OK: ${pathParts.join("/")} (${content.length} chars)`);
-				} else {
-					console.log(`  MISSING (best-effort): ${pathParts.join("/")}`);
-				}
-			}
+			expect(checkFile("commit-plan", "docs", "plans", SLUG, "complete", "commit-plan.md")).toBe(true);
+			expect(checkFile("doc-manifest", "docs", "plans", SLUG, "complete", "doc-manifest.md")).toBe(true);
 
 			// Summary count
 			const allPlanFiles = [
@@ -579,6 +744,9 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 				...critiqueFiles.map(f => `critiques/${f}`),
 				"questions.md", "final-plan.md",
 				"execution/task-breakdown.md", "execution/task-log.md",
+				"review/test-results.md",
+				"insights.md",
+				"complete/commit-plan.md", "complete/doc-manifest.md",
 			];
 
 			const existingCount = allPlanFiles.filter(f => existsSync(join(slugDir, f.split("/").join("/")))).length;
