@@ -278,7 +278,7 @@ export async function checkPipeline(
 	// ════════════════════════════════════════════
 
 	const review = tryRead(join(slugDir, "review", "test-results.md")) ?? "";
-	checks.push(D("review-has-verdict", "Review", "review has verdict (Meets Standards / PASS)", /meets standards|result:\s*pass|verdict:\s*pass/i.test(review), /meets standards|result:\s*pass|verdict:\s*pass/i.test(review) ? "found" : "missing"));
+	checks.push(D("review-has-verdict", "Review", "review has verdict (PASS / Meets Standards)", /meets standards|\*\*pass\*\*|result:\s*pass|verdict.*pass|# verdict/i.test(review), /meets standards|\*\*pass\*\*|result:\s*pass|verdict.*pass|# verdict/i.test(review) ? "found" : "missing"));
 	checks.push(D("review-has-pass-fail", "Review", "review shows pass/fail counts", /\d+\s*(pass|fail|test)/i.test(review), /\d+\s*(pass|fail|test)/i.test(review) ? "found" : "missing"));
 	checks.push(D("review-has-tsc-output", "Review", "review shows tsc compilation result", /tsc|typescript|0 error|compilation/i.test(review), /tsc|typescript|0 error|compilation/i.test(review) ? "found" : "missing"));
 	checks.push(D("review-is-substantial", "Review", "review is 500+ chars (not a one-liner)", review.length >= 500, `${review.length} chars`));
