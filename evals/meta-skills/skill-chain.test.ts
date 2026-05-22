@@ -404,7 +404,18 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			const text = client.getTextResponse(events);
 			console.log("Full pipeline response:", text.length, "chars");
 
-			const slugDir = join(dir, "docs", "plans", SLUG);
+			// Discover the slug — GLM generates it from the task description
+			const plansDir = join(dir, "docs", "plans");
+			const slugDirs = existsSync(plansDir)
+				? readdirSync(plansDir, { withFileTypes: true })
+					.filter(d => d.isDirectory())
+					.map(d => d.name)
+				: [];
+			console.log("Slug directories:", slugDirs);
+			expect(slugDirs.length, "Expected at least one slug directory under docs/plans/").toBeGreaterThanOrEqual(1);
+			const slug = slugDirs[0];
+			const slugDir = join(plansDir, slug);
+			console.log("Using slug:", slug);
 
 			// ── Helper: check file exists with minimum size ──
 			function checkFile(description: string, ...pathParts: string[]) {
@@ -426,9 +437,9 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			console.log("\n=== Plan Artifacts ===");
 
 			// Root files
-			expect(checkFile("invariants", "docs", "plans", SLUG, "invariants.md")).toBe(true);
-			expect(checkFile("meta", "docs", "plans", SLUG, "meta.md")).toBe(true);
-			expect(checkFile("prompt", "docs", "plans", SLUG, "prompt.md")).toBe(true);
+			expect(checkFile("invariants", "docs", "plans", slug, "invariants.md")).toBe(true);
+			expect(checkFile("meta", "docs", "plans", slug, "meta.md")).toBe(true);
+			expect(checkFile("prompt", "docs", "plans", slug, "prompt.md")).toBe(true);
 
 			// meta.md must have phase tracking table
 			const metaContent = readFileSync(join(slugDir, "meta.md"), "utf8");
@@ -451,14 +462,14 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 				"research-web.md",
 			];
 			for (const f of researchFiles) {
-				expect(checkFile(f, "docs", "plans", SLUG, "research", f)).toBe(true);
+				expect(checkFile(f, "docs", "plans", slug, "research", f)).toBe(true);
 			}
 
 			// Plan documents
 			console.log("\n=== Plan Documents ===");
-			expect(checkFile("initial-plan", "docs", "plans", SLUG, "initial-plan.md")).toBe(true);
-			expect(checkFile("user-flow-spec", "docs", "plans", SLUG, "user-flow-spec.md")).toBe(true);
-			expect(checkFile("deepened-plan", "docs", "plans", SLUG, "deepened-plan.md")).toBe(true);
+			expect(checkFile("initial-plan", "docs", "plans", slug, "initial-plan.md")).toBe(true);
+			expect(checkFile("user-flow-spec", "docs", "plans", slug, "user-flow-spec.md")).toBe(true);
+			expect(checkFile("deepened-plan", "docs", "plans", slug, "deepened-plan.md")).toBe(true);
 
 			// initial-plan must have key sections
 			const planContent = readFileSync(join(slugDir, "initial-plan.md"), "utf8");
@@ -487,17 +498,17 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 
 			// Q&A and Final Plan
 			console.log("\n=== Q&A and Final Plan ===");
-			expect(checkFile("questions", "docs", "plans", SLUG, "questions.md")).toBe(true);
-			expect(checkFile("final-plan", "docs", "plans", SLUG, "final-plan.md")).toBe(true);
+			expect(checkFile("questions", "docs", "plans", slug, "questions.md")).toBe(true);
+			expect(checkFile("final-plan", "docs", "plans", slug, "final-plan.md")).toBe(true);
 
 			// Execution tracking
 			console.log("\n=== Execution ===");
-			expect(checkFile("task-breakdown", "docs", "plans", SLUG, "execution", "task-breakdown.md")).toBe(true);
-			expect(checkFile("task-log", "docs", "plans", SLUG, "execution", "task-log.md")).toBe(true);
+			expect(checkFile("task-breakdown", "docs", "plans", slug, "execution", "task-breakdown.md")).toBe(true);
+			expect(checkFile("task-log", "docs", "plans", slug, "execution", "task-log.md")).toBe(true);
 
 			// Review results must exist with real test output
 			console.log("\n=== Review Results ===");
-			expect(checkFile("test-results", "docs", "plans", SLUG, "review", "test-results.md")).toBe(true);
+			expect(checkFile("test-results", "docs", "plans", slug, "review", "test-results.md")).toBe(true);
 			const reviewPath = join(slugDir, "review", "test-results.md");
 			if (existsSync(reviewPath)) {
 				const reviewContent = readFileSync(reviewPath, "utf8");
@@ -506,7 +517,7 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 
 			// Insights must exist
 			console.log("\n=== Insights ===");
-			expect(checkFile("insights", "docs", "plans", SLUG, "insights.md")).toBe(true);
+			expect(checkFile("insights", "docs", "plans", slug, "insights.md")).toBe(true);
 
 			// ════════════════════════════════════════════
 			// Phase 2: Implementation Files
@@ -577,8 +588,8 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			// ════════════════════════════════════════════
 			console.log("\n=== Completion Artifacts ===");
 
-			expect(checkFile("commit-plan", "docs", "plans", SLUG, "complete", "commit-plan.md")).toBe(true);
-			expect(checkFile("doc-manifest", "docs", "plans", SLUG, "complete", "doc-manifest.md")).toBe(true);
+			expect(checkFile("commit-plan", "docs", "plans", slug, "complete", "commit-plan.md")).toBe(true);
+			expect(checkFile("doc-manifest", "docs", "plans", slug, "complete", "doc-manifest.md")).toBe(true);
 
 			// Summary count
 			const allPlanFiles = [
@@ -600,6 +611,7 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 			// Checklist (deterministic + LLM judge)
 			// ════════════════════════════════════════════
 			const pipelineReport = await checkPipeline(dir, {
+				slug,
 				llmJudge: { model: MODEL, timeoutMs: 120_000 },
 			});
 			console.log(formatReport(pipelineReport));
