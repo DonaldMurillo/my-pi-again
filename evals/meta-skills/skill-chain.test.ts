@@ -218,7 +218,7 @@ docs/plans/${SLUG}/
     research-web.md
   initial-plan.md               (Goal, Architecture, Key Decisions, Changes, Data Model, UI Changes, Testing Strategy, Web Research Insights, Open Questions)
   user-flow-spec.md             (actors, happy path flows, error flows, edge cases, test matrix)
-  deepened-plan.md              (concrete file paths, function signatures, error handling, rollback)
+  deepened-plan.md              (concrete file paths, function signatures, error handling, implementation order, rollback)
   critiques/
     critique-swe.md             (strengths, concerns table with severity/issue/suggestion)
     critique-security.md
@@ -273,7 +273,7 @@ Files you MUST create with the write tool:
 - src/types.ts — TypeScript interfaces (MCPServerConfig, MCPTool, etc.)
 - src/config.ts — config loading from .pi/mcp-servers.json
 - src/search.ts — tool search/discovery logic
-- src/search.test.ts — vitest tests for search functionality
+- src/search.test.ts — vitest tests (MUST include: multi-word query tests, edge cases, scoring order verification)
 
 ## CRITICAL: CRITIQUES MUST BE SUBSTANTIVE
 
@@ -318,6 +318,18 @@ Your implementation files go in src/:
 - src/config.ts — Configuration loading
 - src/search.ts — Search/discovery logic  
 - src/search.test.ts — Tests using vitest
+
+## CRITICAL: DEEPENED PLAN MUST HAVE IMPLEMENTATION ORDER
+
+The deepened-plan.md MUST contain an "Implementation Order" section that lists
+the exact sequence in which files/functions should be built. This is not optional.
+Use a heading like "## Implementation Order" or "## Build Sequence".
+
+## CRITICAL: TESTS MUST COVER MULTI-WORD QUERIES
+
+The search.test.ts file MUST include at least one test case for multi-word queries
+(e.g., searching for "file system" or "git commit" should return relevant results).
+Use describe blocks like "multi-word queries" or "multi-word search".
 
 ## First Action
 

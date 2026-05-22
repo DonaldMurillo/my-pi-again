@@ -262,6 +262,13 @@ The deepener makes 3 passes:
 2. Completeness — Error handling, edge cases, migration, rollback
 3. Actionability — "What to do" + "how to verify" per section
 
+After the 3 passes, add a final section:
+
+### Implementation Order
+
+List the exact build sequence (e.g., types → config → search → index → tests).
+Include dependency rationale for each step.
+
 Update `meta.md`: Deepening → completed.
 
 ### Phase: Critique
