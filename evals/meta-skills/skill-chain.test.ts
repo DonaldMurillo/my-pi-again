@@ -33,6 +33,7 @@ import {
 	mkdirSync, rmSync, readdirSync,
 } from "node:fs";
 import { buildSkillMap, resolveChain, resolveAll } from "../../extensions/skill-chain/resolver";
+import { scorePipeline, formatScore, type ScoreConfig } from "./scoring";
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
@@ -508,13 +509,15 @@ describe("E2E: GLM baseline (no pipeline)", { timeout: 3_600_000, sequential: tr
 				if (!testOk) console.log("test output:", testOutput.slice(-500));
 			}
 
+			// Score the baseline output
+			const baselineScore = await scorePipeline(dir, { runBuild: false });
+			console.log(formatScore(baselineScore));
+
 			// Log summary for comparison (don't assert — this is a control group)
 			console.log(`\n=== BASELINE SUMMARY ===`);
 			console.log(`Response: ${text.length} chars`);
-			console.log(`Plan artifacts: ${planCount}/${planFiles.length}`);
-			console.log(`Src files: ${srcCount}/${srcFiles.length}`);
-			console.log(`tsc: ${tscOk ? "PASS" : "FAIL"}`);
-			console.log(`vitest: ${testOk ? "PASS" : "FAIL"}`);
+			console.log(`Score: ${baselineScore.grade} (${(baselineScore.total / baselineScore.maxTotal * 100).toFixed(0)}%)`);
+			console.log(baselineScore.summary);
 
 		} finally {
 			client.kill();
@@ -751,6 +754,14 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 
 			const existingCount = allPlanFiles.filter(f => existsSync(join(slugDir, f.split("/").join("/")))).length;
 			console.log(`\n=== SUMMARY: ${existingCount}/${allPlanFiles.length} plan artifacts found ===`);
+
+			// ════════════════════════════════════════════
+			// Scorecard (deterministic + LLM judge)
+			// ════════════════════════════════════════════
+			const pipelineScore = await scorePipeline(dir, {
+				llmJudge: { model: MODEL, timeoutMs: 120_000 },
+			});
+			console.log(formatScore(pipelineScore));
 
 		} finally {
 			client.kill();
