@@ -331,6 +331,27 @@ The search.test.ts file MUST include at least one test case for multi-word queri
 (e.g., searching for "file system" or "git commit" should return relevant results).
 Use describe blocks like "multi-word queries" or "multi-word search".
 
+## CRITICAL: Q&A RESOLUTIONS MUST HAVE CONFIDENCE
+
+Each question resolution in questions.md MUST include a confidence level.
+Format: "Confidence: High/Medium/Low" after each resolution.
+Example: "Resolution: [AUTO-RESOLVED] Option (A). ... Confidence: High."
+
+## CRITICAL: TASK-LOG MUST HAVE VERIFICATION SECTION
+
+The execution/task-log.md file MUST include a "## Verification" section at the bottom
+that shows the actual output of running "tsc --noEmit" and "npx vitest run".
+Do NOT skip this — it proves the code works.
+
+## CRITICAL: TESTS MUST COVER ERROR CASES
+
+The search.test.ts file MUST have test cases for error scenarios:
+- Empty search query
+- Malformed input
+- Null/undefined values in tool data
+- Config file not found
+Use describe blocks like "error handling" or "edge cases".
+
 ## First Action
 
 Read ${skillsRoot}/deep-plan/SKILL.md and follow its instructions starting from
