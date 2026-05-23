@@ -238,6 +238,22 @@ export default function registerSkillChain(pi: ExtensionAPI): void {
 		}
 	});
 
+	// Inject pipeline directive into system prompt so GLM always sees it
+	// This is critical — passive skill files get ignored by the model
+	if (state.config.autoResolve && state.config.autoResolve.length > 0) {
+		const directive = buildPipelineDirective(state);
+		if (directive) {
+			pi.on("before_agent_start", async (event) => {
+				event.systemPrompt += `
+
+<skill_chain_pipeline>
+${directive}
+</skill_chain_pipeline>`;
+			});
+		}
+	}
+
+	// Keep resources_discover for backward compat + file on disk
 	pi.on("resources_discover", async (_event, _ctx) => {
 		// When autoResolve is set, return ONLY the pipeline directive —
 		// the model loads individual skills on demand per task via the read tool.
