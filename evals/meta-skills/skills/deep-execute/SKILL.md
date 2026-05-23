@@ -123,7 +123,10 @@ On `/deep-execute --resume`:
 
 When all tasks are done:
 
-1. Run final lint + build to verify everything is clean
-2. Update `meta.md`: Implementation → completed
-3. Print summary of what was implemented
-4. Suggest running `/deep-review {slug}` for post-implementation review
+1. Run `npm install` to install dependencies
+2. Run `npx tsc --noEmit` — if it fails, FIX the type errors in the source files and re-run until it passes
+3. Run `npx vitest run` — if any tests fail, FIX the code or tests and re-run until they pass
+4. **NEVER proceed with broken code.** tsc MUST exit 0. vitest MUST exit 0.
+5. Update `meta.md`: Implementation → completed
+6. Print summary of what was implemented
+7. Suggest running `/deep-review {slug}` for post-implementation review

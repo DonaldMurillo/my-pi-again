@@ -287,6 +287,36 @@ Each reads `deepened-plan.md` AND `user-flow-spec.md`.
 If `--critics` flag is set, only spawn the specified critics.
 If `--skip-critics` flag is set, skip this phase entirely.
 
+**CRITICAL: Critique Output Format**
+
+Each critique file MUST use this exact format:
+
+```markdown
+# Critique: {Lens} Quality
+
+## Strengths
+- {specific good thing about the plan}
+
+## Concerns
+
+| # | Severity | Issue | Suggestion |
+|---|----------|-------|------------|
+| 1 | **High** | {specific problem with quote from plan} | {concrete fix} |
+| 2 | **Medium** | ... | ... |
+| 3 | **Low** | ... | ... |
+
+## Missing from Plan
+- {thing the plan overlooks}
+```
+
+Rules:
+- Each critique MUST have at least 5 concerns
+- Use EXACTLY these severity labels: **High**, **Medium**, **Low** (not P1/P2/P3, not Critical/Warning)
+- Each concern MUST reference specific text from deepened-plan.md
+- Each concern MUST have a concrete, actionable suggestion
+- MUST include a "Missing from Plan" section
+- Generic advice like "add error handling" is NOT acceptable — be specific
+
 Update `meta.md`: Critique → completed.
 
 ### Phase: Q&A

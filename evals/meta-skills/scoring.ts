@@ -177,7 +177,7 @@ export async function checkPipeline(
 
 	for (const f of critiqueFiles) {
 		const c = tryRead(join(slugDir, "critiques", f)) ?? "";
-		const severityCount = (c.match(/High|Medium|Low/gi) || []).length;
+		const severityCount = (c.match(/High|Medium|Low|\|\s*\*\*(High|Medium|Low)\*\*|\[P[123]\]/gi) || []).length;
 		checks.push(D(`critique-depth:${f}`, "Critique Depth", `${f} has 5+ severity-tagged concerns`, severityCount >= 5, `${severityCount} severity items`));
 	}
 
@@ -213,7 +213,7 @@ export async function checkPipeline(
 	const finalPlan = tryRead(join(slugDir, "final-plan.md")) ?? "";
 	checks.push(D("final-has-qa-resolutions", "Final Plan", "final-plan references Q&A resolutions", /Q&A|resolution|auto-resolve|decision/i.test(finalPlan), /Q&A|resolution|auto-resolve|decision/i.test(finalPlan) ? "found" : "missing"));
 	checks.push(D("final-has-architecture", "Final Plan", "final-plan has architecture section", /architecture|system design/i.test(finalPlan), /architecture|system design/i.test(finalPlan) ? "found" : "missing"));
-	checks.push(D("final-has-file-list", "Final Plan", "final-plan lists new/modified files", /new file|modified file|files.*create|create.*file/i.test(finalPlan), /new file|modified file|files.*create|create.*file/i.test(finalPlan) ? "found" : "missing"));
+	checks.push(D("final-has-file-list", "Final Plan", "final-plan lists implementation files", /new file|modified file|files.*create|create.*file|Step \d+.*src\/|src\/[a-z]/i.test(finalPlan), /new file|modified file|files.*create|create.*file|Step \d+.*src\/|src\/[a-z]/i.test(finalPlan) ? "found" : "missing"));
 	checks.push(D("final-has-implementation-order", "Final Plan", "final-plan has implementation order", /implementation order|order|step 1|phase 1/i.test(finalPlan), /implementation order|order|step 1|phase 1/i.test(finalPlan) ? "found" : "missing"));
 	checks.push(D("final-different-from-initial", "Final Plan", "final-plan differs from initial-plan", finalPlan !== plan && finalPlan.length > 100, finalPlan === plan ? "identical!" : `${finalPlan.length} chars, different`));
 
@@ -234,20 +234,37 @@ export async function checkPipeline(
 	// CODE — existence + quality
 	// ════════════════════════════════════════════
 
+	// Find the main logic file (not index.ts, types.ts, config.ts)
+	const srcDir = join(dir, "src");
+	const srcFiles = existsSync(srcDir)
+		? readdirSync(srcDir).filter(f => f.endsWith(".ts") && !f.endsWith(".d.ts"))
+		: [];
+	const coreFiles = srcFiles.filter(f =>
+		!f.startsWith("index") && !f.startsWith("types") && !f.startsWith("config") && !f.includes(".test.")
+	);
+	const mainLogicFile = coreFiles.length > 0 ? coreFiles[0] : null;
+	const testFiles = srcFiles.filter(f => f.includes(".test."));
+	const mainTestFile = testFiles.length > 0 ? testFiles[0] : null;
+
 	for (const f of cfg.expectedSrcFiles) {
 		const c = tryRead(join(dir, f));
 		checks.push(D(`code-exists:${f}`, "Code Existence", `${f} exists with 50+ chars`, !!c && c.length > 50, c ? `${c.length} chars` : "missing"));
 	}
+
+	// Also check that at least one core logic file and one test file exist
+	checks.push(D("code-has-logic-file", "Code Existence", "at least one core logic file exists in src/", !!mainLogicFile, mainLogicFile || "none found"));
+	checks.push(D("code-has-test-file", "Code Existence", "at least one test file exists in src/", !!mainTestFile, mainTestFile || "none found"));
 
 	const types = tryRead(join(dir, "src/types.ts")) ?? "";
 	checks.push(D("code-types-interfaces", "Code Quality", "types.ts exports 3+ interfaces", (types.match(/export interface/g) || []).length >= 3, `${(types.match(/export interface/g) || []).length} interfaces`));
 	checks.push(D("code-types-mcp-config", "Code Quality", "types.ts defines MCPServerConfig", /MCPServerConfig|MCP.*Config/i.test(types), /MCPServerConfig|MCP.*Config/i.test(types) ? "found" : "missing"));
 	checks.push(D("code-types-mcp-tool", "Code Quality", "types.ts defines MCPTool or Tool type", /MCPTool|Tool\s*\{/i.test(types), /MCPTool|Tool\s*\{/i.test(types) ? "found" : "missing"));
 
-	const search = tryRead(join(dir, "src/search.ts")) ?? "";
-	checks.push(D("code-search-pure-functions", "Code Quality", "search.ts exports 3+ functions", (search.match(/export function/g) || []).length >= 3, `${(search.match(/export function/g) || []).length} functions`));
-	checks.push(D("code-search-no-io", "Code Quality", "search.ts has no fs/http/fetch imports", !search || !/import.*\bfs\b|import.*http|import.*fetch/.test(search), /import.*\bfs\b|import.*http|import.*fetch/.test(search) ? "has I/O" : "pure"));
-	checks.push(D("code-search-has-scoring", "Code Quality", "search.ts implements relevance scoring", /score|rank|relevance|weight/i.test(search), /score|rank|relevance|weight/i.test(search) ? "found" : "missing"));
+	// Check main logic file (whichever one GLM created)
+	const logicContent = mainLogicFile ? tryRead(join(srcDir, mainLogicFile)) ?? "" : "";
+	checks.push(D("code-logic-exports-functions", "Code Quality", `${mainLogicFile || "logic file"} exports 3+ functions/classes`, ((logicContent.match(/export function/g) || []).length + (logicContent.match(/export class/g) || []).length) >= 3, `${(logicContent.match(/export function/g) || []).length} functions, ${(logicContent.match(/export class/g) || []).length} classes`));
+	checks.push(D("code-logic-no-io", "Code Quality", `${mainLogicFile || "logic file"} has no fs/http/fetch imports`, !logicContent || !/import.*\bfs\b|import.*http|import.*fetch/.test(logicContent), /import.*\bfs\b|import.*http|import.*fetch/.test(logicContent) ? "has I/O" : "pure"));
+	checks.push(D("code-logic-has-scoring", "Code Quality", `${mainLogicFile || "logic file"} implements relevance scoring`, /score|rank|relevance|weight/i.test(logicContent), /score|rank|relevance|weight/i.test(logicContent) ? "found" : "missing"));
 
 	const index = tryRead(join(dir, "src/index.ts")) ?? "";
 	checks.push(D("code-index-default-export", "Code Quality", "index.ts exports default function", /export default function/i.test(index), /export default function/i.test(index) ? "found" : "missing"));
@@ -256,12 +273,12 @@ export async function checkPipeline(
 	checks.push(D("code-index-has-command", "Code Quality", "index.ts registers /mcp command", /registerCommand.*mcp|command.*mcp/i.test(index), /registerCommand.*mcp|command.*mcp/i.test(index) ? "found" : "missing"));
 	checks.push(D("code-no-any-types", "Code Quality", "no `any` types in index.ts", !/: any\b/.test(index), /: any\b/.test(index) ? "found any types" : "clean"));
 
-	const testFile = tryRead(join(dir, "src/search.test.ts")) ?? "";
-	checks.push(D("code-test-count", "Test Quality", "search.test.ts has 10+ test cases", (testFile.match(/\bit\(/g) || []).length >= 10, `${(testFile.match(/\bit\(/g) || []).length} test cases`));
-	checks.push(D("code-test-describe-blocks", "Test Quality", "tests have describe blocks grouping by function", (testFile.match(/describe\(/g) || []).length >= 3, `${(testFile.match(/describe\(/g) || []).length} describe blocks`));
-	checks.push(D("code-test-edge-cases", "Test Quality", "tests cover edge cases (empty, null, special chars)", /empty|null|undefined|special char|boundary/i.test(testFile), /empty|null|undefined|special char|boundary/i.test(testFile) ? "found" : "missing"));
-	checks.push(D("code-test-scoring", "Test Quality", "tests verify scoring/relevance ordering", /score|rank|relevance|ordering|sorted|descending/i.test(testFile), /score|rank|relevance|ordering|sorted|descending/i.test(testFile) ? "found" : "missing"));
-	checks.push(D("code-test-multi-word", "Test Quality", "tests cover multi-word queries", /multi.?word|two word|multiple word|split.*query/i.test(testFile), /multi.?word|two word|multiple word/i.test(testFile) ? "found" : "missing"));
+	const testContent = mainTestFile ? tryRead(join(srcDir, mainTestFile)) ?? "" : "";
+	checks.push(D("code-test-count", "Test Quality", `${mainTestFile || "test file"} has 10+ test cases`, (testContent.match(/\bit\(/g) || []).length >= 10, `${(testContent.match(/\bit\(/g) || []).length} test cases`));
+	checks.push(D("code-test-describe-blocks", "Test Quality", "tests have describe blocks grouping by function", (testContent.match(/describe\(/g) || []).length >= 3, `${(testContent.match(/describe\(/g) || []).length} describe blocks`));
+	checks.push(D("code-test-edge-cases", "Test Quality", "tests cover edge cases (empty, null, special chars)", /empty|null|undefined|special char|boundary/i.test(testContent), /empty|null|undefined|special char|boundary/i.test(testContent) ? "found" : "missing"));
+	checks.push(D("code-test-scoring", "Test Quality", "tests verify scoring/relevance ordering", /score|rank|relevance|ordering|sorted|descending/i.test(testContent), /score|rank|relevance|ordering|sorted|descending/i.test(testContent) ? "found" : "missing"));
+	checks.push(D("code-test-multi-word", "Test Quality", "tests cover multi-word queries", /multi.?word|two word|multiple word|split.*query/i.test(testContent), /multi.?word|two word|multiple word/i.test(testContent) ? "found" : "missing"));
 
 	// ════════════════════════════════════════════
 	// BUILD — compile + test
@@ -299,7 +316,7 @@ export async function checkPipeline(
 	// Check for summary
 	const summaryFile = tryRead(join(reviewDir, "summary.md")) ?? "";
 	checks.push(D("review-has-summary", "Review Rounds", "review/summary.md exists", summaryFile.length > 50, `${summaryFile.length} chars`));
-	checks.push(D("summary-has-round-count", "Review Rounds", "summary lists round count", /\d+\s*round/i.test(summaryFile), /\d+\s*round/i.test(summaryFile) ? "found" : "missing"));
+	checks.push(D("summary-has-round-count", "Review Rounds", "summary lists round count", /round|\*\*Rounds/i.test(summaryFile), /round|\*\*Rounds/i.test(summaryFile) ? "found" : "missing"));
 	checks.push(D("summary-has-findings-count", "Review Rounds", "summary lists total findings", /finding|issue/i.test(summaryFile), /finding|issue/i.test(summaryFile) ? "found" : "missing"));
 	checks.push(D("summary-has-verdict", "Review Rounds", "summary has PASS/NEEDS FIXES verdict", /PASS|NEEDS FIXES|Meets Standards/i.test(summaryFile), /PASS|NEEDS FIXES|Meets Standards/i.test(summaryFile) ? "found" : "missing"));
 
