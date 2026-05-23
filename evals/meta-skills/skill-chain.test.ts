@@ -44,7 +44,7 @@ class RpcClient {
 	private buffer = "";
 	private pending: Array<{ resolve: (line: JsonLine) => void; predicate: (line: JsonLine) => boolean }> = [];
 	private lines: JsonLine[] = [];
-	private textParts: string[] = []; // accumulate text incrementally
+	private textParts: string[] = [];
 	private done = false;
 
 	constructor(cwd: string, model?: string) {
@@ -69,8 +69,6 @@ class RpcClient {
 			if (!line.trim()) continue;
 			try {
 				const obj = JSON.parse(line);
-
-				// Extract text incrementally to save memory
 				if (obj.type === "message_update") {
 					const msg = (obj as any).message;
 					if (msg?.role === "assistant" && Array.isArray(msg?.content)) {
@@ -83,12 +81,9 @@ class RpcClient {
 				} else if (obj.type === "agent_end") {
 					this.done = true;
 				}
-
-				// Only keep non-text events (tool calls, etc.) to save memory
 				if (obj.type !== "message_update") {
 					this.lines.push(obj);
 				}
-
 				for (let i = this.pending.length - 1; i >= 0; i--) {
 					if (this.pending[i].predicate(obj)) {
 						this.pending[i].resolve(obj);
@@ -169,15 +164,6 @@ export default defineConfig({
 
 	// Create src directory for the extension output
 	mkdirSync(join(dir, "src"), { recursive: true });
-
-	// Write a project-level instruction — like CLAUDE.md in real projects
-	// This is what a real user would have: minimal guidance that references the pipeline
-	writeFileSync(join(dir, "INSTRUCTIONS.md"),
-		"# Project Instructions\n\n" +
-		"This project uses the skill-chain deep-* pipeline.\n" +
-		"Follow the active pipeline directive. Use TaskCreate to create tasks for each phase,\n" +
-		"then work through them with TaskNext. Read each skill file when you start its task.\n"
-	);
 
 	return dir;
 }
@@ -410,7 +396,11 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 		const client = new RpcClient(dir, MODEL);
 
 		try {
-			const prompt = TASK_DESCRIPTION;
+			const prompt = TASK_DESCRIPTION +
+				" Write all implementation code in src/. " +
+				"Follow the active pipeline directive. " +
+				"Use TaskCreate to create tasks for each phase, then work through them with TaskNext. " +
+				"Read each skill file when you start its task.";
 
 			const events = await client.prompt(prompt);
 			const text = client.getTextResponse(events);

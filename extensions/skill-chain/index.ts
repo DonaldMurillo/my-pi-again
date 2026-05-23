@@ -183,6 +183,24 @@ By the end of the pipeline, these MUST exist on disk:
 - **No any types** — use proper TypeScript interfaces, not any
 - **Review must be multi-round** — at least 3 rounds with blind reviewers, not a single test run
 - **Implementation must be real** — write actual TypeScript code, not documentation of what you'd write
+
+## CRITICAL ENFORCEMENT RULES
+
+These rules are NON-NEGOTIABLE. Violating any of them means the pipeline FAILS.
+
+1. **Critiques MUST use severity labels**: Every critique file MUST have a concerns table with columns: #, Severity, Issue, Suggestion. Use EXACTLY **High**, **Medium**, **Low** as severity values (NOT P1/P2/P3, NOT Critical/Warning). Each critique MUST have at least 5 concerns.
+
+2. **Implementation MUST compile and pass tests**: After writing all src/ files, run `npm install && npx tsc --noEmit && npx vitest run`. If tsc has errors, FIX THEM and re-run. If tests fail, FIX THEM and re-run. NEVER proceed with broken code.
+
+3. **meta.md MUST have a ## Slug section**: Include a section like `## Slug\nmcp-discovery` (or whatever slug you generated).
+
+4. **task-log.md MUST have ## Verification section**: Show the actual output of tsc and vitest runs.
+
+5. **deepened-plan.md MUST have function signatures AND implementation order**: Include actual TypeScript function signatures like `export function searchTools(...)`. Include a `## Implementation Order` section listing the build sequence.
+
+6. **questions.md MUST include confidence levels**: Each resolution must end with `Confidence: High/Medium/Low`.
+
+7. **tests MUST cover multi-word queries AND error cases**: Include test cases for multi-word search queries (e.g., "file system") and error scenarios (empty query, null values).
 `;
 }
 
