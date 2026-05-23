@@ -33,6 +33,7 @@ The test suite should exercise the FULL pipeline: prompt → agent → tool call
 | `file-viewer` | Syntax-highlighted file overlay with scroll, search, mouse clicks |
 | `tasks` | Persistent task management (TodoWrite, TaskCreate, TaskUpdate, TaskGet, TaskList, TaskNext, TaskSearch, TaskArchive) |
 | `assistant` | Interactive personality-driven assistants in modal overlay, `are-we-there-yet` auto-reprompt on agent_end |
+| `mcp-discovery` | MCP server discovery via `.pi/mcp-servers.json`, incremental tool activation, `/mcp` overlay |
 
 ## Quick start
 
