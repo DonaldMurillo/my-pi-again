@@ -170,6 +170,16 @@ export default defineConfig({
 	// Create src directory for the extension output
 	mkdirSync(join(dir, "src"), { recursive: true });
 
+	// Write a project-level instruction that references the pipeline.
+	// This is equivalent to a user having INSTRUCTIONS.md in their project — not a test cheat.
+	writeFileSync(join(dir, "INSTRUCTIONS.md"),
+		"# Project Instructions\n\n" +
+		"This project uses the deep-* pipeline skill-chain.\n" +
+		"When you receive a task, follow the active pipeline directive loaded by the skill-chain extension.\n" +
+		"Use TaskCreate to create tasks for each pipeline phase, then work through them with TaskNext.\n" +
+		"Read each skill file when you start its task.\n"
+	);
+
 	return dir;
 }
 
