@@ -5,5 +5,10 @@ export default defineConfig({
 		include: ["extensions/**/*.test.ts", "tests/**/*.test.ts", "evals/**/*.test.ts"],
 		testTimeout: 120_000, // e2e tests need time for pi to start
 		hookTimeout: 30_000,
+		poolOptions: {
+			forks: {
+				nodeOptions: ["--max-old-space-size=8192"],
+			},
+		},
 	},
 });

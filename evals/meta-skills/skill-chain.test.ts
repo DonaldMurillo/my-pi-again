@@ -44,6 +44,8 @@ class RpcClient {
 	private buffer = "";
 	private pending: Array<{ resolve: (line: JsonLine) => void; predicate: (line: JsonLine) => boolean }> = [];
 	private lines: JsonLine[] = [];
+	private textParts: string[] = []; // accumulate text incrementally
+	private done = false;
 
 	constructor(cwd: string, model?: string) {
 		const args = ["--mode", "rpc", "--no-session"];
@@ -67,7 +69,26 @@ class RpcClient {
 			if (!line.trim()) continue;
 			try {
 				const obj = JSON.parse(line);
-				this.lines.push(obj);
+
+				// Extract text incrementally to save memory
+				if (obj.type === "message_update") {
+					const msg = (obj as any).message;
+					if (msg?.role === "assistant" && Array.isArray(msg?.content)) {
+						for (const block of msg.content) {
+							if (block.type === "text" && typeof block.text === "string") {
+								this.textParts.push(block.text);
+							}
+						}
+					}
+				} else if (obj.type === "agent_end") {
+					this.done = true;
+				}
+
+				// Only keep non-text events (tool calls, etc.) to save memory
+				if (obj.type !== "message_update") {
+					this.lines.push(obj);
+				}
+
 				for (let i = this.pending.length - 1; i >= 0; i--) {
 					if (this.pending[i].predicate(obj)) {
 						this.pending[i].resolve(obj);
@@ -82,28 +103,14 @@ class RpcClient {
 		this.proc.stdin!.write(JSON.stringify({ type: "prompt", message }) + "\n");
 		const startTime = Date.now();
 		while (Date.now() - startTime < timeoutMs) {
-			const endIdx = this.lines.findIndex((l) => l.type === "agent_end");
-			if (endIdx >= 0) return this.lines.splice(0, endIdx + 1);
+			if (this.done) return this.lines.splice(0);
 			await new Promise((r) => setTimeout(r, 200));
 		}
 		return this.lines.splice(0);
 	}
 
-	getTextResponse(events: JsonLine[]): string {
-		const parts: string[] = [];
-		for (const e of events) {
-			if (e.type === "message_update") {
-				const msg = (e as any).message;
-				if (msg?.role === "assistant" && Array.isArray(msg?.content)) {
-					for (const block of msg.content) {
-						if (block.type === "text" && typeof block.text === "string") {
-							parts.push(block.text);
-						}
-					}
-				}
-			}
-		}
-		return parts.join(" ");
+	getTextResponse(_events: JsonLine[]): string {
+		return this.textParts.join(" ");
 	}
 
 	kill() { this.proc.kill(); }
