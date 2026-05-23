@@ -394,11 +394,7 @@ describe("E2E: GLM follows deep-* pipeline", { timeout: 3_600_000, sequential: t
 		const client = new RpcClient(dir, MODEL);
 
 		try {
-			const prompt = TASK_DESCRIPTION +
-				" Write all implementation code in src/. " +
-				"Follow the active pipeline directive. " +
-				"Use TaskCreate to create tasks for each phase, then work through them with TaskNext. " +
-				"Read each skill file when you start its task.";
+			const prompt = TASK_DESCRIPTION;
 
 			const events = await client.prompt(prompt);
 			const text = client.getTextResponse(events);
